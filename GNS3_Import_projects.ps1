@@ -66,6 +66,8 @@ param (
 
     [string]$vbox_path_ovftool="C:\Program Files\Oracle\VirtualBox\VBoxManage.exe",
 
+    [Parameter(Mandatory=$false, Position=5)]
+    [Alias("TmpPath")]
     [string]$temp_path="C:\Temp"
 )
 
@@ -81,20 +83,8 @@ function verify-param {
         affiche_error "La variable gns3_proj_path_local n est pas definie !"
         pause ; exit
     }
-    if ( $vmware_path_vm_folder -eq "" -or ! (Test-Path $vmware_path_vm_folder) ) {
-        affiche_error "La variable vmware_path_vm_folder n est pas definie !"
-        pause ; exit
-    }
-    if ( $vmware_path_ovftool -eq "" -or ! (Test-Path $vmware_path_ovftool) ) {
-        affiche_error "La variable vmware_path_ovftool n est pas definie !"
-        pause ; exit
-    }
     if ( $gns3_proj_path_src -eq "" -or ! (Test-Path $gns3_proj_path_src) ) {
         affiche_error "La variable gns3_proj_path_src n est pas definie !"
-        pause ; exit
-    }
-    if ( $vbox_path_ovftool -eq "" -or ! (Test-Path $vbox_path_ovftool) ) {
-        affiche_error "La variable vbox_path_ovftool n est pas definie !"
         pause ; exit
     }
 	
@@ -147,6 +137,101 @@ function verify-param {
     Write-Host ""
 }
 
+# Fonction qui verifie les paramètres du script
+function verify-param-vm {
+
+        if ( ($($project_file.topology.nodes) | where {$_.node_type -match "vmware"}) -ne $null ) {
+            if ( $vmware_path_ovftool -eq "" -or ! (Test-Path $vmware_path_ovftool) ) {
+                affiche_error "La variable vmware_path_ovftool n est pas definie ou le chemin n existe pas !"
+                delete_temp "$temp_path"
+            }
+            if ( $vmware_path_vm_folder -eq "" -or ! (Test-Path $vmware_path_vm_folder) ) {
+                affiche_error "La variable vmware_path_vm_folder n est pas definie ou le chemin n existe pas !"
+                delete_temp "$temp_path"
+            }
+        }
+        if ( ($($project_file.topology.nodes) | where {$_.node_type -match "virtualbox"}) -ne $null ) {
+	        if ( $vbox_path_ovftool -eq "" -or ! (Test-Path $vbox_path_ovftool) ) {
+                affiche_error "La variable vbox_path_ovftool n est pas definie ou le chemin n existe pas !"
+                delete_temp "$temp_path"
+            }
+        }
+
+}
+
+# Vérification si la place est suffisante sur le disque (taille des vms)
+function check_space {
+
+    # Calcul de la taille restante du disque des fichiers temporaire
+    $size_disk=(Get-PSDrive "$(($temp_path).Split(':')[0])" | select -ExpandProperty Free) / 1GB
+
+    $vm_vbox_test=$project_file.topology.nodes | where node_type -eq "virtualbox"
+    $vm_vmware_test=$project_file.topology.nodes | where node_type -eq "vmware"
+
+    # Calcul de l'espace restant sur le dique d'import des vms
+    if ("$vm_vmware_test" -ne "") {
+        $size_disk_vmware=(Get-PSDrive "$(($vmware_path_vm_folder).Split(':')[0])" | select -ExpandProperty Free) / 1GB
+    }
+    if ("$vm_vbox_test" -ne "") {
+        $size_disk_vbox=(Invoke-Command {& $vbox_path_ovftool list systemproperties} | where {$_ -match "Default machine folder"}).replace('Default machine folder:          ','')
+        $size_disk_vbox=(Get-PSDrive "$(($size_disk_vbox).Split(':')[0])" | select -ExpandProperty Free) / 1GB
+    }
+
+    # Calcul de la taille du projet
+    $project_size=([System.IO.Compression.ZipFile]::OpenRead("$gns3_proj_path_src\$nom_project.zip").Entries | Measure-Object -property length -sum).Sum /1GB
+
+    $size_after_import=$([int]$size_disk) - $([int]$project_size)
+
+    Write-Host $size_after_import
+    Write-Host $project_size
+    Write-Host $size_disk
+    pause 
+    # Si la taille du projet dépasse la taille du disque alors le script s'arrete
+    if ([int]$project_size -gt [int]$size_disk) {
+        Write-Host ""
+        affiche_error "La taille du disque est insuffisante $size_after_import GB pour exporter le projet : $("{0:N1}" -f ($project_size)) GB !"
+        delete_temp "$temp_path"
+    }
+
+    # Si la taille du projet dépasse la taille du disque ou son stocké les vm vmware alors le script s'arrete
+    elseif ( ! (Test-Path variable:\size_disk_vmware) -and ([int]$project_size -gt [int]$size_disk_vmware)) {
+        Write-Host ""
+        affiche_error "La taille du disque est insuffisante $size_disk_vmware GB pour exporter le projet : $("{0:N1}" -f ($project_size)) GB !"
+        delete_temp "$temp_path"
+    }
+
+    # Si la taille du projet dépasse la taille du disque ou son stocké les vm vbox alors le script s'arrete
+    elseif ( ! (Test-Path variable:\vm_vbox_test) -and ([int]$project_size -gt [int]$size_disk_vbox)) {
+        Write-Host ""
+        affiche_error "La taille du disque est insuffisante $size_disk_vbox GB pour exporter le projet : $("{0:N1}" -f ($project_size)) GB !"
+        delete_temp "$temp_path"
+    }
+
+    # Affiche un avertissement si la taille du disque apres exportation atteint une taille définie comme critique
+    elseif (([int]$project_size + 10) -gt [int]$size_disk) {
+
+        Write-Host ""
+        Write-Warning "La taille du disque est suffisante pour exporter le projet : $("{0:N1}" -f ($project_size)) GB !"
+        Write-Warning "Il restera moins de $size_after_import GB sur le disque !"
+
+        Write-Host ""
+        $continuer=$(Read-Host "Continuer 0 : non ou 1 : oui")
+        Write-Host ""
+
+        if ($continuer -eq 0) {
+            affiche_error "La taille du disque est insuffisante pour exporter le projet : $("{0:N1}" -f ($project_size)) GB !"
+            delete_temp "$temp_path"
+        }
+    }
+    # Continue le script si la taille du disque est suffisante
+    else {
+        Write-Host ""
+        Write-Host "La taille du disque est suffisante après export : $size_after_import GB !" -ForegroundColor Green
+        Write-Host "Taille du projet : $("{0:N1}" -f ($project_size)) GB !" -ForegroundColor Green
+    }
+}
+
+
 # Fonction qui copie les images du project en ssh
 function ssh_copie {
 
@@ -160,7 +245,7 @@ function ssh_copie {
 
     if ( $? -eq 0 ) {
         affiche_error "Import de l image $images echoue !"
-        delete_temp
+        delete_temp "$temp_path"
     }
 }
 
@@ -176,7 +261,7 @@ function ssh_command {
 
     if ( $? -eq 0 ) {
         affiche_error "Commande $command a echoue sur l hote $ip_vm_gns3 avec l utilisateur $user_gns3_vm !"
-        delete_temp
+        delete_temp "$temp_path"
     }
 }
 
@@ -230,7 +315,11 @@ function affiche_error {
 # Fonction qui supprime les fichiers temporaires du script
 function delete_temp {
 
-    Remove-Item -Force -Recurse $temp_path
+    Param(
+      [string]$path
+    )
+
+    Remove-Item -Force -Recurse "$path"
     pause ; exit
 
 }
@@ -248,7 +337,7 @@ choix_projets
 # Vérifie si le projet est un projet GNS3
 do {
     Add-Type -assembly "system.io.compression.filesystem"
-    $test_projet=[System.IO.Compression.ZipFile]::OpenRead("$gns3_proj_path_src\$nom_project.zip").Entries | ? Name -Like "*.gns3"
+    $test_projet=[System.IO.Compression.ZipFile]::OpenRead("$gns3_proj_path_src\$nom_project.zip").Entries | where Name -Like "*.gns3"
 
     if ( $test_projet -eq $null ) {
         Write-Host ""
@@ -257,6 +346,9 @@ do {
         choix_projets
     }
 } while ( $test_projet -eq $null )
+
+# Vérifie si la taille du disque est suffisante
+check_space
 
 # Decompression du project
 
@@ -269,16 +361,20 @@ if ((Get-Host | select -ExpandProperty Version | select -ExpandProperty major) -
     # Décompression du zip pour powershell 5
     Expand-Archive -Force -Path "$gns3_proj_path_src\$nom_project.zip" -DestinationPath "$temp_path\"
 
+    if ( $? -eq 0 ) {
+        affiche_error "Decompression du projet $nom_project echoue !"
+        delete_temp "$temp_path"
+    }
 } else {
 
     # Décompresson pour les autres versions de Powershell
     Add-Type -Assembly "System.IO.Compression.FileSystem"
     [System.IO.Compression.ZipFile]::ExtractToDirectory("$gns3_proj_path_src\$nom_project.zip", "$temp_path\")
-}
 
-if ( $? -eq 0 ) {
-    affiche_error "Decompression du projet $nom_project echoue !"
-    delete_temp
+    if ( $? -eq 0 ) {
+        affiche_error "Decompression du projet $nom_project echoue !"
+        delete_temp "$temp_path"
+    }
 }
 
 Write-Host ""
@@ -393,11 +489,11 @@ if ("$vm_path_temp" -ne "") {
             if ("$vm_vbox" -eq "$vm") {
 
                 $test_vbox=1
-                Invoke-Command {& $vbox_path_ovftool import "$vm"}
-
+                Invoke-Command {& $vbox_path_ovftool import "$vm"
                 if ( $? -eq 0 ) {
                     affiche_error "Import de la VM virtualbox $vm a echoue !"
-                    delete_temp
+                    delete_temp "$temp_path"
+                }
                 }
             }
         }
@@ -408,12 +504,16 @@ if ("$vm_path_temp" -ne "") {
         }
 
 		# Command d'import de la VM Vmware
-        Invoke-Command {& $vmware_path_ovftool --lax --allowExtraConfig "$vm" "$vmware_path_vm_folder"}
-
+        Invoke-Command {& $vmware_path_ovftool --lax --allowExtraConfig "$vm" "$vmware_path_vm_folder"
         if ( $? -eq 0 ) {
             affiche_error "Import de la VM vmware $vm a echoue !"
-            delete_temp
+            delete_temp "$temp_path"
         }
+        }
+
+        # Supression de la vm du repertoire temporaire
+        $folder_vm_name=(Get-ChildItem "$vm").Directory.FullName
+        delete_temp "$folder_vm_name"
     }
 
     Write-Host ""
@@ -429,7 +529,7 @@ if ("$vm_path_temp" -ne "") {
 
         if ( $? -eq 0 ) {
                 affiche_error "Copie du fichier gns3 du projet $temp_path\$nom_project\$nom_project.gns3 echoue !"
-                delete_temp
+                delete_temp "$temp_path"
         }
 
         # Extrait le chemin des vm à changer dans fichier de configuration du projet
@@ -453,7 +553,7 @@ if ("$vm_path_temp" -ne "") {
 
         if ( $? -eq 0 ) {
             affiche_error "Changement du repertoire de la VM $vm_path_projet echoue !"
-            delete_temp
+            delete_temp "$temp_path"
         }
 
 	    # Creation du nouveau fichier de configuration de GNS3 avec le nouveau chemin des VMs
@@ -472,14 +572,14 @@ Copy-Item -Recurse -Force -Exclude images "$temp_path\$nom_project" "$gns3_proj_
 
 if ( $? -eq 0 ) {
     affiche_error "Copie du projet $nom_project echoue !"
-    delete_temp
+    delete_temp "$temp_path"
 }
 
 Write-Host ""
 Write-Host "Copie du projet $nom_project reussi dans $gns3_proj_path_local\$nom_project !" -ForegroundColor Green
 
+# Vidage des fichiers temporaire
+delete_temp "$temp_path"
+
 Write-Host ""
 Write-Host "Script termine avec succes !" -ForegroundColor Green
-
-# Vidage des fichiers temporaire
-delete_temp
