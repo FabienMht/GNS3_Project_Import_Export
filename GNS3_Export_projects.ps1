@@ -5,32 +5,65 @@
 
 .DESCRIPTION
    Export des projets GNS3 avec les images,fichiers et machines virtuelles
+   Fonctionnalités du script d'export :
 
-.EXAMPLE
-   ./Nom du script
-
-.INPUTS
-   Pas d'entrée en pipe possible
-
-.OUTPUTS
-   
-.NOTES
-    NAME:    Export projets GNS3
-    AUTHOR:    Fabien Mauhourat
-
-    VERSION HISTORY:
-
-    1.0     2017.09.12   Fabien MAUHOURAT
-
-.FUNCTIONALITY
-    Export des projets GNS3 :
+        - Calcul de l'espace disponnible des disques par rapport à la taille du projet
         - Export des fichiers du projet contenue dans la VM GNS3
+
         - Export des images du projet :
             - QEMU
             - IOS
             - DOCKER
             - IOU
-        - Export des machines virtuelles du projet
+
+        - Export des machines virtuelles du projet :
+            - Machine virtuelles Vmware
+            - Machine virtuelles Virtualbox
+            - Change la mention Use_any_adapter de GNS3 du fichier deconfiguration du projet de false à true (Compatibilité import)
+
+        - Export du projet dans un fichier zip
+
+        - Arborescence de l'export
+            - Dossier "non_du _projet"
+                - Dossier images
+                    - IOS
+                    - QEMU
+                    - IOU
+                    - Docker
+                - Dossier fichiers du projet
+                - Fichier de configuration de GNS3
+            - Dossier VM1
+            - Dossier VM2
+            ...
+
+.EXAMPLE
+   Inclut par défaut les Vms et les images avec le projet
+   ./Nom du script
+
+.EXAMPLE
+    Pour ne pas inclure les images dans l'export du projet
+    ./Nom du script -IncludeImages $false
+
+.EXAMPLE
+    Pour lancer le script et définir les variables en ligne de commande sans modifier le script
+    ./Nom du script -ProjectPath "Path" -ImagesPath "Path" -IPGns3vm "Ip de la VM GNS3" -TmpPath "Path" -ExportPath "Path"
+
+.INPUTS
+   Pas d'entrée en pipe possible
+
+.LINK
+    https://github.com/FabienMht/GNS3_Project_Import_Export
+
+.NOTES
+    NAME:    Export projets GNS3
+    AUTHOR:    Fabien Mauhourat
+    Version GNS3 : 2.0.3
+
+    VERSION HISTORY:
+
+    1.0     2017.09.12   Fabien MAUHOURAT
+    1.1     2017.09.28   Fabien MAUHOURAT
+
 #>
 
 # Définition des variables
@@ -38,13 +71,11 @@
 
 [cmdletbinding()]
 param (
-    
-    [parameter(Mandatory=$false)]
-    [string]$IncludeVms=$true,
 
     [parameter(Mandatory=$false)]
     [string]$IncludeImages=$true,
 
+    # Variables à changer
     [Parameter(Mandatory=$false, Position=1)]
     [Alias("ProjectPath")]
     [string]$gns3_proj_path_local="D:\Soft\GNS3\projects",
@@ -57,19 +88,20 @@ param (
     [Alias("IPGns3vm")]
     [string]$ip_vm_gns3="192.168.0.50",
 
-    [string]$gns3_proj_path_vm="/opt/gns3/projects",
-    [string]$pass_gns3_vm="gns3",
-    [string]$user_gns3_vm="gns3",
-    [string]$vmware_path_ovftool="C:\Program Files (x86)\VMware\VMware Workstation\OVFTool\ovftool.exe",
-    [string]$vbox_path_ovftool="C:\Program Files\Oracle\VirtualBox\VBoxManage.exe",
-
     [Parameter(Mandatory=$false, Position=4)]
     [Alias("TmpPath")]
     [string]$temp_path="C:\Temp",
 
     [Parameter(Mandatory=$false, Position=5)]
     [Alias("ExportPath")]
-    [string]$export_project_path="C:\Temp"
+    [string]$export_project_path="C:\Temp",
+
+    # Variables par défaut
+    [string]$gns3_proj_path_vm="/opt/gns3/projects",
+    [string]$pass_gns3_vm="gns3",
+    [string]$user_gns3_vm="gns3",
+    [string]$vmware_path_ovftool="C:\Program Files (x86)\VMware\VMware Workstation\OVFTool\ovftool.exe",
+    [string]$vbox_path_ovftool="C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
 )
 
 # Fonction qui verifie les paramètres du script
@@ -141,7 +173,7 @@ function verify-param {
 
 	# Affiche un recap de la configuration en cours
     Write-Host ""
-    Write-Host "Verification des parametres terminee sans erreur !" -ForegroundColor Green
+    Write-Host "Verification des parametres terminee sans erreur :" -ForegroundColor Green
     Write-Host ""
     Write-Host "La configuration est la suivante :"
     Write-Host "     * Chemin projects : $gns3_proj_path_local"
@@ -157,12 +189,15 @@ function verify-param {
 # Fonction qui verifie les paramètres du script
 function verify-param-vm {
 
+        # Si le projet utilise Vmware : verifie la variable du chemin de l'utilitaire ovftool
         if ( ($vm_project | where {$_.node_type -match "vmware"}) -ne $null ) {
             if ( $vmware_path_ovftool -eq "" -or ! (Test-Path $vmware_path_ovftool) ) {
                 affiche_error "La variable vmware_path_ovftool n est pas definie ou le chemin n existe pas !"
                 delete_temp
             }
         }
+
+        # Si le projet utilise Vbox : verifie la variable du chemin de l'utilitaire vboxmanage
         if ( ($vm_project | where {$_.node_type -match "virtualbox"}) -ne $null ) {
 	        if ( $vbox_path_ovftool -eq "" -or ! (Test-Path $vbox_path_ovftool) ) {
                 affiche_error "La variable vbox_path_ovftool n est pas definie ou le chemin n existe pas !"
@@ -172,12 +207,16 @@ function verify-param-vm {
 
 }
 
-# Vérification si la place est suffisante sur le disque (taille des vms)
+# Vérification si la place est suffisante sur le disque (taille des vms seulement pour les VM Vmware et Vbox)
 function check_space {
+
+    Write-Host ""
+    Write-Host "La taille du projet :" -ForegroundColor Green
 
     # Calcul de la taille du projet après exportation
     foreach ($vm in $($vm_project)) {
-            
+        
+        # Récuperation du chemin des vms du projet
         if ($($vm.node_type) -match "virtualbox") {
 
             $vm_path=Invoke-Command {& $vbox_path_ovftool showvminfo "$($vm.properties.vmname)"} | ? {$_ -match "Config file"}
@@ -190,6 +229,8 @@ function check_space {
             $vm_path=$($vm.properties.vmx_path)
         }
         $folder_vm_name=(Get-ChildItem "$vm_path").Directory.FullName
+
+        # Calcul la taille du dossier ou sont stockées les Vms
         $folder_size=$folder_size + ((Get-ChildItem "$folder_vm_name" -recurse | Where { -not $_.PSIsContainer } | Measure-Object -property length -sum).Sum / 1GB)
     }
 
@@ -207,6 +248,7 @@ function check_space {
     Write-Host "Taille du projet : $("{0:N1}" -f ($folder_size)) GB !" -ForegroundColor Green
     Write-Host "Taille du projet apres export : $("{0:N1}" -f ($folder_size * 80 / 100)) GB !" -ForegroundColor Green
 
+    # Verifie pour chaque disque que la taille est suffisante en fonction du projet
     foreach ($disk in "$root_temp","$root_export") {
 
         
@@ -215,8 +257,23 @@ function check_space {
 
         # Si la taille du projet dépasse la taille du disque alors le script s'arrete
         if ([int]$folder_size -gt [int]$size_disk) {
+
             Write-Host ""
             affiche_error "La taille du disque $disk est insuffisante $size_after_export GB pour exporter le projet : $("{0:N1}" -f ($folder_size)) GB !"
+
+            # Vérifie l'espace libre des autres disques
+            $other_disk=Get-PSDrive -PSProvider FileSystem | where {$_.Name -notmatch "$disk"} | Select name,free
+
+            foreach ($disk_back in $($other_disk)) {
+                if ([int]$folder_size -gt [int]($disk_back.free / 1GB)) {
+                    continue
+                }
+                else {
+                    Write-Host ""
+                    Write-Host "La taille du disque $($disk_back.name) est suffisante pour exporter le projet !"
+                }
+            }
+            
             delete_temp
         }
 
@@ -239,7 +296,7 @@ function check_space {
         # Continue le script si la taille du disque est siffisante
         else {
             Write-Host ""
-            Write-Host "La taille du disque $disk est suffisante après export : $size_after_export GB !" -ForegroundColor Green
+            Write-Host "La taille du disque $disk est suffisante après export : $size_after_export GB !"
         }
         if ($root_test -eq 1) {
             break
@@ -287,7 +344,7 @@ function find_images {
       [string]$images_name
     )
 
-	# Recherche l'image en cours dans le dossier elles sont stockées
+	# Recherche l'image en cours dans le dossier ou elles sont stockées
     $images_path_temp=Get-ChildItem -Path "$gns3_images_path_local" -Recurse | where {$_ -match "^$($images_name)$"}
 
     if ( "$images_path_temp" -eq ""  ) {
@@ -295,7 +352,7 @@ function find_images {
         delete_temp
     }
 
-	# Selection du chemin du chemin de l'image
+	# Selection du chemin de l'image
     $images_path=$images_path_temp.PSPath | % {$_.split('::')[2] + ":" + $_.split('::')[3]}
 
     return $images_path
@@ -373,9 +430,18 @@ Get-ChildItem $gns3_proj_path_local | select Name | foreach {
     }
 }
 
-Write-Host ""
-$num_project=$(Read-Host "Quel project ")
-Write-Host ""
+# Quite le script si aucun projet dans le dossier indiqué
+if ($compteur -eq 0) {
+    affiche_error "Aucun projet à exporter !"
+    delete_temp
+}
+
+# Tant qu'aucun projet n'est selectionné
+do {
+    Write-Host ""
+    $num_project=$(Read-Host "Quel project ")
+    $num_project=[int]$num_project
+} while ( ($num_project -eq "") -or ($num_project -gt $compteur) )
 
 # Récuperation du nom du projet en fonction du numero du projet selectionné
 $compteur=0
@@ -415,13 +481,13 @@ $image_project=$($project_file.topology.nodes) | where {$_.node_type -match "qem
 Write-Host "      *  L ID du projet : $($project_file.project_id)"
 
 # Vérification des paramètres des vms
-# Si les Vms doivent être incluse au projet
-if ($IncludeVms -eq $true) {
+# Si le projet inclut des VMs
+if ($vm_project -ne $null) {
     verify-param-vm
 }
 
-# Vérification si la place est suffisante sur le disque
-if ( ($vm_project -ne $null) -and ($IncludeVms -eq $true)) {
+# Vérification si la place est suffisante sur le disque seulement pour les VM Vmware et Vbox
+if ($vm_project -ne $null) {
     check_space
 }
 
@@ -435,7 +501,7 @@ Write-Host ""
 Write-Host "Copie des fichiers du project $nom_project reussi dans $temp_path\$nom_project\project-files !" -ForegroundColor Green
 
 # Si les Images doivent être incluse au projet
-if ($IncludeImages -eq $true) {
+if ( ($IncludeImages -eq $true) -and ($image_project -ne $null) ) {
 
     # Creation de l'arborescence pour stocker les images dans le project
     # Création du dossier images du projet
@@ -540,14 +606,14 @@ if ($IncludeImages -eq $true) {
 
 }
 # Export des vms du project en ovf
-# Si les Vms doivent être incluse au projet
+# Si le projet inclut des VMs
 
-if ($IncludeVms -eq $true) {
+if ($vm_project -ne $null) {
 
     foreach ($vm in $($vm_project)) {
 
         Write-Host ""
-        Write-Host "Export de la VM $($vm.name) en cours !" -ForegroundColor Green
+        Write-Host "Export de la VM $($vm.name) en cours :" -ForegroundColor Green
         Write-Host ""
 
 	    # Export des vm vmware dans le repertoire temporaire
@@ -617,12 +683,13 @@ if ($IncludeVms -eq $true) {
 # Compression du project
 
 Write-Host ""
-Write-Host "Compression de $nom_project en cours !" -ForegroundColor Green
+Write-Host "Compression de $nom_project en cours :" -ForegroundColor Green
 
 # Creation du zip pour les autres versions de powershell
 if (Test-Path "$export_project_path\$nom_project.zip") {
     Remove-Item -Path "$export_project_path\$nom_project.zip"
 }
+# Export du projet en ZIP avec une compression Optimal
 Add-Type -Assembly System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory("$temp_path\", "$export_project_path\$nom_project.zip", "Optimal", $false)
 
@@ -635,8 +702,8 @@ if ( $? -eq 0 ) {
 Write-Host ""
 Write-Host "Compression de $nom_project reussi dans $export_project_path\$nom_project !" -ForegroundColor Green
 
-Write-Host ""
-Write-Host "Script termine avec succes !" -ForegroundColor Green
-
 # Vidage des fichiers temporaire
 delete_temp
+
+Write-Host ""
+Write-Host "Script termine avec succes !" -ForegroundColor Green
