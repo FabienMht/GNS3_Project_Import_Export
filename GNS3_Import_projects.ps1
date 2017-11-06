@@ -72,13 +72,15 @@ param (
 
     [Parameter(Mandatory=$false, Position=2)]
     [Alias("ProjectZip")]
-    [string]$gns3_proj_path_src="C:\Users\fabien\Desktop",
+    [string]$gns3_proj_path_src="C:\Temp",
 
     [Parameter(Mandatory=$false, Position=3)]
     [Alias("IPGns3vm")]
-    [string]$ip_vm_gns3="192.168.146.128",
+    [string]$ip_vm_gns3="192.168.0.125",
 
     [string]$gns3_images_path_vm="/opt/gns3/images",
+	
+	[string]$gns3_projects_path_vm="/opt/gns3/projects",
 
     [string]$pass_gns3_vm="gns3",
 
@@ -140,6 +142,10 @@ function verify-param {
     }
     if ( $gns3_images_path_vm -eq "" ) {
         affiche_error "La variable gns3_images_path_vm n est pas definie !"
+        pause ; exit
+    }
+	if ( $gns3_projects_path_vm -eq "" ) {
+        affiche_error "La variable gns3_projects_path_vm n est pas definie !"
         pause ; exit
     }
 	
@@ -717,7 +723,7 @@ if ("$vm_path_temp" -ne "") {
     Write-Host ""
     Write-Host "Import des vm dans $vmware_path_vm_folder terminee avec succes !" -ForegroundColor Green
 
-    # Si le projet utilise Vmware il faut changer le chemin des Vms dans le fichier de dconfiguration de GNS3
+    # Si le projet utilise Vmware il faut changer le chemin des Vms dans le fichier de configuration de GNS3
     if ( "$vm_vmware" -ne "" ) {
 
         # Backup du fichier du fichier de configuration du projet GNS3
@@ -777,6 +783,15 @@ if ( $? -eq 0 ) {
 
 Write-Host ""
 Write-Host "Copie du projet $nom_project reussi dans $gns3_proj_path_local\$nom_project !" -ForegroundColor Green
+
+# Création du répertoire du projet sur la vm gns3
+ssh_command "mkdir -p $gns3_projects_path_vm/$($project_file.project_id)/project-files"
+
+# Copie du project dans le répertoire de la vm gns3 des projets de gns3
+ssh_copie "$gns3_proj_path_local\$nom_project\project-files\" "$gns3_projects_path_vm/$($project_file.project_id)/project-files"
+
+Write-Host ""
+Write-Host "Copie du projet $nom_project reussi dans gns3_projects_path_vm/$($project_file.project_id) !" -ForegroundColor Green
 
 # Vidage des fichiers temporaire
 delete_temp "$temp_path"

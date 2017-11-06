@@ -90,7 +90,7 @@ param (
 
     [Parameter(Mandatory=$false, Position=4)]
     [Alias("TmpPath")]
-    [string]$temp_path="C:\Temp",
+    [string]$temp_path="E:\Temp",
 
     [Parameter(Mandatory=$false, Position=5)]
     [Alias("ExportPath")]
@@ -647,33 +647,33 @@ if ($vm_project -ne $null) {
 	    }
     }
 
-    if ("$($vm.properties.use_any_adapter)" -match "false") {
+    # if ("$($vm.properties.use_any_adapter)" -match "false") {
 
-        # Backup du fichier du fichier de configuration du projet GNS3
+        #Backup du fichier du fichier de configuration du projet GNS3
 
-        Copy-Item -Force -Path "$temp_path\$nom_project\$nom_project.gns3" -Destination "$temp_path\$nom_project\$nom_project.gns3.back"
+        # Copy-Item -Force -Path "$temp_path\$nom_project\$nom_project.gns3" -Destination "$temp_path\$nom_project\$nom_project.gns3.back"
 
-        if ( $? -eq 0 ) {
-            affiche_error "Copie du fichier gns3 du projet $temp_path\$nom_project\$nom_project.gns3 echoue !"
-            delete_temp
-        }
+        # if ( $? -eq 0 ) {
+            # affiche_error "Copie du fichier gns3 du projet $temp_path\$nom_project\$nom_project.gns3 echoue !"
+            # delete_temp
+        # }
 
-        # Changement du repertoire des vm dans le fichier GNS3 du projet
+        #Changement du repertoire des vm dans le fichier GNS3 du projet
 
-        $new_gns3_content=Get-Content "$temp_path\$nom_project\$nom_project.gns3.back" | ForEach-Object {$_.replace('"use_any_adapter": false','"use_any_adapter": true')}
+        # $new_gns3_content=Get-Content "$temp_path\$nom_project\$nom_project.gns3.back" | ForEach-Object {$_.replace('"use_any_adapter": false','"use_any_adapter": true')}
 
-        if ( $? -eq 0 ) {
-            affiche_error "Changement du parametre use_any_adapter dans le fichier de configuration de GNS3 echoue !"
-            delete_temp
-        }
+        # if ( $? -eq 0 ) {
+            # affiche_error "Changement du parametre use_any_adapter dans le fichier de configuration de GNS3 echoue !"
+            # delete_temp
+        # }
 
-        # Creation du nouveau fichier de configuration de GNS3 avec le nouveau chemin des VMs
-        [System.IO.File]::WriteAllLines("$temp_path\$nom_project\$nom_project.gns3", "$new_gns3_content")
+        #Creation du nouveau fichier de configuration de GNS3 avec le nouveau chemin des VMs
+        # [System.IO.File]::WriteAllLines("$temp_path\$nom_project\$nom_project.gns3", "$new_gns3_content")
 
-        Write-Host ""
-        Write-Host "Changement du parametre use_any_adapter dans le fichier de configuration de GNS3 terminee avec succes !" -ForegroundColor Green
+        # Write-Host ""
+        # Write-Host "Changement du parametre use_any_adapter dans le fichier de configuration de GNS3 terminee avec succes !" -ForegroundColor Green
 
-    }
+    # }
 
     Write-Host ""
     Write-Host "Export des VMs dans $temp_path terminee avec succes !" -ForegroundColor Green
