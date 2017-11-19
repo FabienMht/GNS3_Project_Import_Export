@@ -62,7 +62,7 @@
     VERSION HISTORY:
 
     1.0     2017.09.12   Fabien MAUHOURAT
-    1.1     2017.09.28   Fabien MAUHOURAT
+    1.1     2017.09.28   Fabien MAUHOURAT   Ajout de la compatibilité Vbox et de la fonction de calcul de l'espace disque
 
 #>
 

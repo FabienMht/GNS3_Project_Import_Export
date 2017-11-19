@@ -57,8 +57,8 @@
     VERSION HISTORY:
 
     1.0     2017.09.12   Fabien MAUHOURAT
-    1.1     2017.09.28   Fabien MAUHOURAT
-
+    1.1     2017.09.28   Fabien MAUHOURAT   Ajout de la compatibilité Vbox et de la fonction de calcul de l'espace disque
+	
 #>
 
 # Définition des variables
@@ -66,38 +66,41 @@
 
 [cmdletbinding()]
 param (
+
+	# Variables à changer
     [Parameter(Mandatory=$false, Position=1)]
     [Alias("ProjectPath")]
     [string]$gns3_proj_path_local="C:\Users\fabien\GNS3\projects",
+	
+	[Parameter(Mandatory=$false, Position=2)]
+    [Alias("ImagesPath")]
+    [string]$gns3_images_path_local="C:\Users\fabien\GNS3\images",
 
-    [Parameter(Mandatory=$false, Position=2)]
+    [Parameter(Mandatory=$false, Position=3)]
     [Alias("ProjectZip")]
     [string]$gns3_proj_path_src="C:\Temp",
 
-    [Parameter(Mandatory=$false, Position=3)]
+    [Parameter(Mandatory=$false, Position=4)]
     [Alias("IPGns3vm")]
     [string]$ip_vm_gns3="192.168.0.125",
 
-    [string]$gns3_images_path_vm="/opt/gns3/images",
-	
-	[string]$gns3_projects_path_vm="/opt/gns3/projects",
-
-    [string]$pass_gns3_vm="gns3",
-
-    [string]$user_gns3_vm="gns3",
-
-    [string]$vmware_path_ovftool="C:\Program Files (x86)\VMware\VMware Workstation\OVFTool\ovftool.exe",
-
-    # Le chemin absolue des VM doit etre séparé par des doubles "\\"
-    [Parameter(Mandatory=$false, Position=4)]
+	# Le chemin absolue des VM doit etre séparé par des doubles "\\"
+    [Parameter(Mandatory=$false, Position=5)]
     [Alias("VmwareVmFolder")]
     [string]$vmware_path_vm_folder="C:\\Users\\fabien\\Documents\\Virtual Machines",
-
-    [string]$vbox_path_ovftool="C:\Program Files\Oracle\VirtualBox\VBoxManage.exe",
-
-    [Parameter(Mandatory=$false, Position=5)]
+	
+	[Parameter(Mandatory=$false, Position=6)]
     [Alias("TmpPath")]
-    [string]$temp_path="C:\Temp"
+    [string]$temp_path="C:\Temp",
+	
+	# Variable par défaut
+    [string]$gns3_images_path_vm="/opt/gns3/images",
+	[string]$gns3_projects_path_vm="/opt/gns3/projects",
+    [string]$pass_gns3_vm="gns3",
+    [string]$user_gns3_vm="gns3",
+    [string]$vmware_path_ovftool="C:\Program Files (x86)\VMware\VMware Workstation\OVFTool\ovftool.exe",
+    [string]$vbox_path_ovftool="C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
+
 )
 
 # Fonction qui verifie les paramètres du script
@@ -110,6 +113,10 @@ function verify-param {
     }
     if ( $gns3_proj_path_local -eq "" -or ! (Test-Path $gns3_proj_path_local) ) {
         affiche_error "La variable gns3_proj_path_local n est pas definie !"
+        pause ; exit
+    }
+	if ( $gns3_images_path_local -eq "" -or ! (Test-Path $gns3_images_path_local) ) {
+        affiche_error "La variable gns3_images_path_local n est pas definie !"
         pause ; exit
     }
     if ( $gns3_proj_path_src -eq "" -or ! (Test-Path $gns3_proj_path_src) ) {
@@ -487,10 +494,10 @@ if ( $? -eq 0 ) {
 	delete_temp "$temp_path"
 }
 
+Remove-Item -Force "$temp_path\$nom_project.txt"
+
 $vm_vbox=$project_file.topology.nodes | where node_type -eq "virtualbox"
 $vm_vmware=$project_file.topology.nodes | where node_type -eq "vmware"
-
-Remove-Item -Force "$temp_path\$nom_project.txt"
 
 # Vérification des paramètres pour les vms
 verify-param-vm
@@ -630,6 +637,8 @@ if ("$imges_test" -ne "") {
 
     Write-Host ""
     Write-Host "Import des images dans $gns3_images_path_vm terminee avec succes !" -ForegroundColor Green
+	
+	Copy-Item -Recurse -Force -Exclude docker "$temp_path\$nom_project\images\*" "$gns3_images_path_local\"
 
 }
 # Import des vm du project en ovf
@@ -706,13 +715,14 @@ if ("$vm_path_temp" -ne "") {
         }
 
         # Commande d'import de la VM Vmware
-        Invoke-Command {& $vmware_path_ovftool --lax --allowExtraConfig "$vm_path" "$vmware_path_vm_folder"
+        Invoke-Command {& $vmware_path_ovftool\OVFTool\ovftool.exe --lax --allowExtraConfig "$vm_path" "$vmware_path_vm_folder"
         if ( $? -eq 0 ) {
             affiche_error "Import de la VM vmware $vm_name a echoue !"
             delete_temp "$temp_path"
         }
         }
-        Invoke-Command {& "C:\Program Files (x86)\VMware\VMware Workstation\vmware.exe" "$vmware_path_vm_folder\$vm_name\$vm_name.vmx"
+		
+        Invoke-Command {& $vmware_path_ovftool\vmware.exe "$vmware_path_vm_folder\$vm_name\$vm_name.vmx"
         if ( $? -eq 0 ) {
             affiche_error "Import de la VM vmware $vm_name a echoue !"
             delete_temp "$temp_path"
@@ -774,7 +784,8 @@ if ("$vm_path_temp" -ne "") {
 
 # Copie du project dans le répertoire local des projets de gns3
 
-Copy-Item -Recurse -Force -Exclude images "$temp_path\$nom_project" "$gns3_proj_path_local\$nom_project"
+New-Item -ItemType Directory -Force -Path "$gns3_proj_path_local\$nom_project" | Out-Null
+Copy-Item -Recurse -Force -Exclude images "$temp_path\$nom_project\*" "$gns3_proj_path_local\$nom_project"
 
 if ( $? -eq 0 ) {
     affiche_error "Copie du projet $nom_project echoue !"
@@ -794,7 +805,7 @@ Write-Host ""
 Write-Host "Copie du projet $nom_project reussi dans gns3_projects_path_vm/$($project_file.project_id) !" -ForegroundColor Green
 
 # Vidage des fichiers temporaire
-delete_temp "$temp_path"
+Remove-Item -Force -Recurse "$temp_path"
 
 Write-Host ""
 Write-Host "Script termine avec succes !" -ForegroundColor Green
