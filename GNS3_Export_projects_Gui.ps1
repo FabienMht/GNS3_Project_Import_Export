@@ -37,16 +37,16 @@
             ...
 
 .EXAMPLE
-   Inclut par défaut les Vms et les images avec le projet
-   ./Nom du script
+   Inclut par défaut les Vms et les images avec le projet :
+	> ./Nom du script
 
 .EXAMPLE
-    Pour ne pas inclure les images dans l'export du projet
-    ./Nom du script -IncludeImages $false
+    Pour ne pas inclure les images et ne pas archiver l'export du projet :
+	> ./Nom du script -ArchiveProjet $false -IncludeImages $false
 
 .EXAMPLE
-    Pour lancer le script et définir les variables en ligne de commande sans modifier le script
-    ./Nom du script -ProjectPath "Path" -ImagesPath "Path" -IPGns3vm "Ip de la VM GNS3" -TmpPath "Path" -ExportPath "Path"
+	Pour lancer le script et définir les variables en ligne de commande sans modifier le script :
+	> ./Nom du script -ProjectPath "Path" -ImagesPath "Path" -IPGns3vm "Ip de la VM GNS3" -TmpPath "Path" -ExportPath "Path"
 
 .INPUTS
    Pas d'entrée en pipe possible
@@ -55,18 +55,20 @@
     https://github.com/FabienMht/GNS3_Project_Import_Export
 
 .NOTES
-    NAME:    Export projets GNS3
-    AUTHOR:    Fabien Mauhourat
-    Version GNS3 : 2.0.3
+    NAME            : Export projets GNS3
+    AUTHOR          : Fabien Mauhourat
+    Version GNS3    : 2.0.3
+	Tester sur      : Windows 10
 
     VERSION HISTORY:
 
     1.0     2017.09.12   Fabien MAUHOURAT   Initial Version
     1.1     2017.09.28   Fabien MAUHOURAT   Ajout de la compatibilité Vbox et de la fonction de calcul de l'espace disque
-	2.0		2017.11.19   Fabien MAUHOURAT   Ajout de la GUI et correction de BUGs changement d'adaptateur et export import de VM Vbox '
-											et amélioration export de container docker et telechargement automatique de putty 
-											Possibilité de ne pas inclure les images avec le projet de ne pas compresser l'export et de modifier le parametre de compression de vmware
-
+	2.0     2017.11.19   Fabien MAUHOURAT   Ajout de la GUI et correction de BUGs changement d'adaptateur et export import de VM Vbox '
+                                            et amélioration export de container docker et telechargement automatique de putty 
+                                            Possibilité de ne pas inclure les images avec le projet de ne pas compresser l'export et de modifier le parametre de compression de vmware
+	2.1     2017.11.23   Fabien MAUHOURAT	Correction de BUGs et Possibilité de cloner une vm QEMU d'un projet à un autre et de télécharger les images de la vm GNS3 en local
+	
 #>
 
 # Définition des variables
@@ -84,7 +86,8 @@ param (
     # Variables à changer
     [Parameter(Mandatory=$false, Position=1)]
     [Alias("ProjectPath")]
-    [string]$gns3_proj_path_local="C:\Users\$env:UserName\GNS3\projects",
+    # [string]$gns3_proj_path_local="C:\Users\$env:UserName\GNS3\projects",
+    [string]$gns3_proj_path_local="D:\Soft\GNS3\projects",
 
     [Parameter(Mandatory=$false, Position=2)]
     [Alias("ImagesPath")]
@@ -92,7 +95,7 @@ param (
 
     [Parameter(Mandatory=$false, Position=3)]
     [Alias("IPGns3vm")]
-    [string]$ip_vm_gns3="",
+    [string]$ip_vm_gns3="192.168.0.50",
 
     [Parameter(Mandatory=$false, Position=4)]
     [Alias("TmpPath")]
@@ -103,22 +106,23 @@ param (
     [string]$export_project_path="C:\Temp",
 
     # Variables par défaut
+	[string]$gns3_images_path_vm="/opt/gns3/images",
     [string]$gns3_proj_path_vm="/opt/gns3/projects",
     [string]$pass_gns3_vm="gns3",
     [string]$user_gns3_vm="gns3",
     [string]$vmware_path_ovftool="C:\Program Files (x86)\VMware\VMware Workstation",
     [string]$vbox_path_ovftool="C:\Program Files\Oracle\VirtualBox\VBoxManage.exe",
-	[string]$putty_path=""
+	[string]$putty_path="",
+	[string]$script_name=$MyInvocation.MyCommand.Name
 )
 
 # Fonction qui verifie les paramètres du script
 function verify-param {
 
 	# Vérifie si la vm GNS3 est joingnable et si les chemins existent
-    if ( ! (ping $ip_vm_gns3 -n 2 | Select-String "TTL=") ) {
-        affiche_error "La vm GNS3 $ip_vm_gns3 n est pas accessible !"
-        exit
-    }
+	
+	ping_gns3_vm "$ip_vm_gns3"
+	
     if ( $gns3_proj_path_local -eq "" -or ! (Test-Path $gns3_proj_path_local) ) {
         affiche_error "La variable gns3_proj_path_local n est pas definie !"
         exit
@@ -330,16 +334,17 @@ function check_space {
             Write-Warning "La taille du disque $disk est suffisante pour exporter le projet : $("{0:N1}" -f ($folder_size)) GB !"
             Write-Warning "Il restera moins de $size_after_export GB sur le disque !"
 
-            Write-Host ""
-            $continuer=$(Read-Host "Continuer 0 : non ou 1 : oui")
-            Write-Host ""
+			$msgBoxInput = [System.Windows.Forms.Messagebox]::Show("Il restera moins de $size_after_export GB sur le disque ! Continuer ?",'VM Vmware','YesNo','Warning')
 
-            if ($continuer -eq 0) {
-                affiche_error "La taille du disque $disk est insuffisante pour exporter le projet : $("{0:N1}" -f ($folder_size)) GB !"
+			if ($msgBoxInput -eq 'No') {
+			
+				affiche_error "La taille du disque $disk est insuffisante pour exporter le projet : $("{0:N1}" -f ($folder_size)) GB !"
                 delete_temp
-            }
+				
+			}
         }
-        # Continue le script si la taille du disque est siffisante
+		
+        # Continue le script si la taille du disque est suffisante
         else {
             Write-Host ""
             Write-Host "La taille du disque $disk est suffisante après export : $size_after_export GB !"
@@ -382,6 +387,7 @@ function verify_images {
     )
 
     $images_test=Get-ChildItem -Path "$temp_path\$nom_project\images\$type" | Where-Object {$_ -match "^$($images_name)$"}
+	
     return "$images_test"
 }
 
@@ -410,16 +416,23 @@ function find_images {
 function ssh_command {
 
     Param(
-      [string]$command
+      [string]$command,
+	  [string]$temp
     )
-
+	
 	# Commande SSH avec Putty
-    & "$($putty_path)plink.exe" -pw "$pass_gns3_vm" "$user_gns3_vm@$ip_vm_gns3" "$command"
+    $ssh_return=& "$($putty_path)plink.exe" -pw "$pass_gns3_vm" "$user_gns3_vm@$ip_vm_gns3" "$command"
 
     if ( $? -eq 0 ) {
+	
         affiche_error "Commande $command a echoue sur l hote $ip_vm_gns3 avec l utilisateur $user_gns3_vm !" | Out-Null
-        delete_temp
+		
+		if ( $temp -eq $true ) {
+			delete_temp
+		}
     }
+	
+	return $ssh_return
 }
 
 # Fonction qui copie des fichiers en ssh de la VM GNS3 vers le repertoire temporaire
@@ -427,15 +440,20 @@ function ssh_copie {
 
     Param(
       [string]$source,
-      [string]$dest
+      [string]$dest,
+	  [string]$temp
     )
 
 	# Commande scp avec Putty
     & "$($putty_path)pscp.exe" -pw "$pass_gns3_vm" -r "$user_gns3_vm@$($ip_vm_gns3):$source" "$dest" | Out-Null
 
     if ( $? -eq 0 ) {
+	
         affiche_error "La copie des fichiers $source vers $dest a echoue !"
-        delete_temp
+		
+        if ( $temp -eq $true ) {
+			delete_temp
+		}
     }
 }
 
@@ -461,31 +479,576 @@ function delete_temp {
 
 }
 
+# Fonction qui copie des fichiers en ssh de la VM GNS3 vers le repertoire temporaire
+function ping_gns3_vm {
+
+    Param(
+      [string]$ip_vm
+    )
+	
+	# Vérifie si la vm GNS3 est joingnable et si les chemins existent
+	if ( ! (ping $ip_vm -n 2 | Select-String "TTL=") ) {
+		affiche_error "La vm GNS3 $ip_vm n est pas accessible !"
+		exit
+	}
+		
+}
+
+# Fonction qui affiche les erreurs du script
+function find_images_id {
+	
+	Param (
+		[string]$images_src_dest,
+		[string]$images_name
+    )
+		
+	Write-Host "Cherche le UUID de l'image $images_name ..." -ForegroundColor Green
+
+	if ( "$images_src_dest" -eq "src" ) {
+	
+		$images_project=$image_project_src
+		
+	} elseif ( "$images_src_dest" -eq "dest" ) {
+	
+		$images_project=$image_project_dest
+		
+	}
+	
+	# Export des images du project
+	foreach ( $images in $images_project ) {
+
+		if ( "$images_name" -eq "$($images.name)" ) {
+		
+			$images_id=$images.node_id
+			write-host "	* $images_id"
+			break
+		}
+	}
+	
+	return $images_id
+}
+
+# Fonction qui affiche les erreurs du script
+function affiche_noeuds {
+
+	Param(
+      [string]$project_file,
+      [string]$cmb
+    )
+	
+	Write-Host ""
+	Write-Host "Liste des noeuds du projet :" -ForegroundColor Green
+	Write-Host ""
+
+	# Recuperation du contenu au format JSON du fichier de configuration du projet GNS3
+	$project_file_content=Get-Content "$project_file" | ConvertFrom-Json
+
+	# Selection des noeuds
+	$image_project=$($project_file_content.topology.nodes) | Where-Object {$_.node_type -match "qemu"}
+	$compteur=0
+	
+	# Export des images du project
+	foreach ($images in $image_project.name) {
+	
+		$compteur=$compteur+1
+		Write-Host "$compteur." $images
+		Invoke-Expression $cmb | out-null
+	}
+}
+
 # Fonction qui affiche les erreurs du script
 function affiche_projets {
 
+	Param(
+      [string]$project_path,
+      [string]$cmb
+    )
+	
 	Write-Host ""
 	Write-Host "Liste des projects GNS3 :" -ForegroundColor Green
 	Write-Host ""
 
-	$script:gns3_proj_path_local = $textbox_ProjetPath.Text
+	# $script:gns3_proj_path_local = $textbox_ProjetPath.Text
+	$proj_path_local = $project_path
 
 	# Affichage de tous les dossiers contenant un fichier de configuration GNS3
-	$cmb_Choix_Projets.Items.clear()
 	$compteur=0
 	
-	Get-ChildItem $gns3_proj_path_local | Select-Object Name | ForEach-Object { 
-		if (Test-Path "$gns3_proj_path_local\$($_.name)\$($_.name).gns3") {
+	Get-ChildItem $proj_path_local | Select-Object Name | ForEach-Object { 
+	
+		if (Test-Path "$proj_path_local\$($_.name)\$($_.name).gns3") {
+		
 			$compteur=$compteur+1
 			Write-Host "$compteur." $_.name
-			$cmb_Choix_Projets.Items.Add($_.name) | Out-Null
+			# $cmb_Choix_Projets.Items.Add($_.name) | Out-Null
+			Invoke-Expression $cmb | out-null
 		}
 	}
 }
 
+function clone_qemu_vm {
+
+	#################################################
+	# Creation des objets de la fenetre
+	#################################################
+
+	# Définission des objets de la fenetre
+	$form_clone_qemu = New-Object System.Windows.Forms.Form
+
+	# Définision des buttons
+	$cloneform_button_clone = New-Object System.Windows.Forms.Button
+	$cloneform_button_quit = New-Object System.Windows.Forms.Button
+	$cloneform_button_ProjetPath = New-Object System.Windows.Forms.Button
+	$cloneform_button_IPPing = New-Object System.Windows.Forms.Button
+
+	# Définission des textboxs
+	$cloneform_textbox_ProjetPath = New-Object System.Windows.Forms.TextBox
+	$cloneform_textbox_IPGns3vm = New-Object System.Windows.Forms.TextBox
+
+	# Définission des Labels
+	$cloneform_label_title = New-Object System.Windows.Forms.Label
+	$cloneform_label_ProjetPath = New-Object System.Windows.Forms.Label
+	$cloneform_label_IPGns3vm = New-Object System.Windows.Forms.Label
+	$cloneform_label_Projet_src = New-Object System.Windows.Forms.Label
+	$cloneform_label_Projet_dest = New-Object System.Windows.Forms.Label
+	$cloneform_label_Noeud_src = New-Object System.Windows.Forms.Label
+	$cloneform_label_Noeud_dest = New-Object System.Windows.Forms.Label
+
+	# Définission des groupbox
+	$cloneform_choix_options = New-Object System.Windows.Forms.GroupBox
+	$cloneform_choix_projets= New-Object System.Windows.Forms.GroupBox
+	$cloneform_choix_noeuds= New-Object System.Windows.Forms.GroupBox
+
+	# Définission des ComboBox
+	$cloneform_cmb_Choix_Projets_src = New-Object System.Windows.Forms.ComboBox
+	$cloneform_cmb_Choix_Projets_dest = New-Object System.Windows.Forms.ComboBox
+	$cloneform_cmb_Choix_Noeud_src = New-Object System.Windows.Forms.ComboBox
+	$cloneform_cmb_Choix_Noeud_dest = New-Object System.Windows.Forms.ComboBox
+	# $openFolderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+
+	#################################################
+	# CONFIGURATION DE LA WINDOWS FORM
+	#################################################
+
+	# Creation de la form principale
+	$form_clone_qemu.FormBorderStyle = 1
+	$form_clone_qemu.MaximizeBox = $False
+	$form_clone_qemu.MinimizeBox = $False
+	$form_clone_qemu.Icon = $iconPS
+	$form_clone_qemu.Text = "Export de projet GNS3 v2.1 Fabien Mauhourat"
+	$form_clone_qemu.StartPosition= 1
+	$form_clone_qemu.Size = New-Object System.Drawing.Size(565,560)
+	$form_clone_qemu.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
+
+	#################################################
+	# AJOUT DES COMPOSANTS
+	#################################################
+
+	# Bouton monter
+	$cloneform_button_clone.Text = "Clone VM"
+	$cloneform_button_clone.Size = New-Object System.Drawing.Size(390,40)
+	$cloneform_button_clone.Location = New-Object System.Drawing.Size(75,410)
+
+	# Bouton Quitter
+	$cloneform_button_quit.Text = "Fermer"
+	$cloneform_button_quit.Size = New-Object System.Drawing.Size(390,40)
+	$cloneform_button_quit.Location = New-Object System.Drawing.Size(75,460)
+
+	# Bouton ProjetPath
+	$cloneform_button_ProjetPath.Text = "..."
+	$cloneform_button_ProjetPath.Size = New-Object System.Drawing.Size(25,27)
+	$cloneform_button_ProjetPath.Location = New-Object System.Drawing.Size(425,47)
+
+	# Bouton Ping
+	$cloneform_button_IPPing.Text = "Ping"
+	$cloneform_button_IPPing.Size = New-Object System.Drawing.Size(40,27)
+	$cloneform_button_IPPing.Location = New-Object System.Drawing.Size(417,97)
+
+	# Label title
+	$cloneform_label_title.Location = New-Object System.Drawing.Point(195,27)
+	$cloneform_label_title.Size = New-Object System.Drawing.Size(380,30)
+	$cloneform_label_title.Text = "Clone QEMU VM"
+	$cloneform_label_title.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,16,1,2,1)
+	$cloneform_label_title.TabIndex = 1
+
+	# TextBox ProjetPath
+	$cloneform_textbox_ProjetPath.AutoSize = $true
+	$cloneform_textbox_ProjetPath.Location = New-Object System.Drawing.Point(20,50)
+	$cloneform_textbox_ProjetPath.Size = New-Object System.Drawing.Size(380,25)
+	$cloneform_textbox_ProjetPath.Text = $textbox_ProjetPath.Text
+
+	# TextBox IPGns3vm
+	$cloneform_textbox_IPGns3vm.AutoSize = $true
+	$cloneform_textbox_IPGns3vm.Location = New-Object System.Drawing.Point(20,100)
+	$cloneform_textbox_IPGns3vm.Size = New-Object System.Drawing.Size(380,50)
+	$cloneform_textbox_IPGns3vm.Text = $textbox_IPGns3vm.Text
+
+	# Label ProjetPath
+	$cloneform_label_ProjetPath.AutoSize = $true
+	$cloneform_label_ProjetPath.Location = New-Object System.Drawing.Point(20,30)
+	$cloneform_label_ProjetPath.Text = "Chemin Projets Gns3 :"
+
+	# Label IPGns3vm
+	$cloneform_label_IPGns3vm.AutoSize = $true
+	$cloneform_label_IPGns3vm.Location = New-Object System.Drawing.Point(20,80)
+	$cloneform_label_IPGns3vm.Text = "Ip VM GNS3 :"
+
+	# Label label_Projet_src
+	$cloneform_label_Projet_src.AutoSize = $true
+	$cloneform_label_Projet_src.Location = New-Object System.Drawing.Point(20,30)
+	$cloneform_label_Projet_src.Text = "Projet Source :"
+
+	# Label label_Projet_dest
+	$cloneform_label_Projet_dest.AutoSize = $true
+	$cloneform_label_Projet_dest.Location = New-Object System.Drawing.Point(20,90)
+	$cloneform_label_Projet_dest.Text = "Projet Destination :"
+
+	# Label label_Noeud_src
+	$cloneform_label_Noeud_src.AutoSize = $true
+	$cloneform_label_Noeud_src.Location = New-Object System.Drawing.Point(20,30)
+	$cloneform_label_Noeud_src.Text = "Noeud Source :"
+
+	# Label label_Noeud_dest
+	$cloneform_label_Noeud_dest.AutoSize = $true
+	$cloneform_label_Noeud_dest.Location = New-Object System.Drawing.Point(20,90)
+	$cloneform_label_Noeud_dest.Text = "Noeud Destination :"
+		
+	# ComboBox qui affiche les projets
+	$cloneform_cmb_Choix_Projets_src.DataBindings.DefaultDataSourceUpdateMode = 0
+	$cloneform_cmb_Choix_Projets_src.AutoSize = 1
+	$cloneform_cmb_Choix_Projets_src.FormattingEnabled = $True
+	$cloneform_cmb_Choix_Projets_src.Location        = New-Object System.Drawing.Point(20,50)
+	$cloneform_cmb_Choix_Projets_src.Name            = "cmb_Choix_Projets_src"
+	$cloneform_cmb_Choix_Projets_src.Size            = New-Object System.Drawing.Size(200,20)
+	$cloneform_cmb_Choix_Projets_src.TabIndex        = 0
+
+	# ComboBox qui affiche les projets
+	$cloneform_cmb_Choix_Projets_dest.DataBindings.DefaultDataSourceUpdateMode = 0
+	$cloneform_cmb_Choix_Projets_dest.AutoSize = 1
+	$cloneform_cmb_Choix_Projets_dest.FormattingEnabled = $True
+	$cloneform_cmb_Choix_Projets_dest.Location        = New-Object System.Drawing.Point(20,110)
+	$cloneform_cmb_Choix_Projets_dest.Name            = "cmb_Choix_Projets_dest"
+	$cloneform_cmb_Choix_Projets_dest.Size            = New-Object System.Drawing.Size(200,20)
+	$cloneform_cmb_Choix_Projets_dest.TabIndex        = 0
+
+	# ComboBox qui affiche les projets
+	$cloneform_cmb_Choix_Noeud_src.DataBindings.DefaultDataSourceUpdateMode = 0
+	$cloneform_cmb_Choix_Noeud_src.AutoSize = 1
+	$cloneform_cmb_Choix_Noeud_src.FormattingEnabled = $True
+	$cloneform_cmb_Choix_Noeud_src.Location        = New-Object System.Drawing.Point(20,50)
+	$cloneform_cmb_Choix_Noeud_src.Name            = "cmb_Choix_Noeud_src"
+	$cloneform_cmb_Choix_Noeud_src.Size            = New-Object System.Drawing.Size(200,20)
+	$cloneform_cmb_Choix_Noeud_src.TabIndex        = 0
+
+	# ComboBox qui affiche les projets
+	$cloneform_cmb_Choix_Noeud_dest.DataBindings.DefaultDataSourceUpdateMode = 0
+	$cloneform_cmb_Choix_Noeud_dest.AutoSize = 1
+	$cloneform_cmb_Choix_Noeud_dest.FormattingEnabled = $True
+	$cloneform_cmb_Choix_Noeud_dest.Location        = New-Object System.Drawing.Point(20,110)
+	$cloneform_cmb_Choix_Noeud_dest.Name            = "cmb_Choix_Noeud_dest"
+	$cloneform_cmb_Choix_Noeud_dest.Size            = New-Object System.Drawing.Size(200,20)
+	$cloneform_cmb_Choix_Noeud_dest.TabIndex        = 0
+
+	############# Groupe de radio bouton Choix de la configuration ################
+
+	$cloneform_choix_options.DataBindings.DefaultDataSourceUpdateMode = 0
+	$cloneform_choix_options.Location = New-Object System.Drawing.Point(35,67)
+	$cloneform_choix_options.Size = New-Object System.Drawing.Size(480,150)
+	$cloneform_choix_options.TabIndex = 3
+	$cloneform_choix_options.TabStop = $False
+	$cloneform_choix_options.Text = “1. Options de configuration”
+	$cloneform_choix_options.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
+
+	$cloneform_choix_options.Controls.Add($cloneform_textbox_ProjetPath)
+	$cloneform_choix_options.Controls.Add($cloneform_textbox_IPGns3vm)
+	$cloneform_choix_options.Controls.Add($cloneform_button_ProjetPath)
+	$cloneform_choix_options.Controls.Add($cloneform_button_IPPing)
+	$cloneform_choix_options.Controls.Add($cloneform_label_ProjetPath)
+	$cloneform_choix_options.Controls.Add($cloneform_label_IPGns3vm)
+
+	############# Groupe de radio bouton Choix du projet ################
+
+	$cloneform_choix_projets.DataBindings.DefaultDataSourceUpdateMode = 0
+	$cloneform_choix_projets.Location = New-Object System.Drawing.Point(20,230)
+	$cloneform_choix_projets.Size = New-Object System.Drawing.Size(245,160)
+	$cloneform_choix_projets.TabIndex = 3
+	$cloneform_choix_projets.TabStop = $False
+	$cloneform_choix_projets.Text = “2. Choisir Projet :”
+	$cloneform_choix_projets.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
+
+	$cloneform_choix_projets.Controls.Add($cloneform_cmb_Choix_Projets_src)
+	$cloneform_choix_projets.Controls.Add($cloneform_cmb_Choix_Projets_dest)
+	$cloneform_choix_projets.Controls.Add($cloneform_label_Projet_src)
+	$cloneform_choix_projets.Controls.Add($cloneform_label_Projet_dest)
+
+	# Appel de la fonction qui affiche les projets
+	$cloneform_cmb_Choix_Projets_src.Items.clear()
+	affiche_projets "$($cloneform_textbox_ProjetPath.Text)" '$cloneform_cmb_Choix_Projets_src.Items.Add($_.name)'
+	$cloneform_cmb_Choix_Projets_dest.Items.clear()
+	affiche_projets "$($cloneform_textbox_ProjetPath.Text)" '$cloneform_cmb_Choix_Projets_dest.Items.Add($_.name)'
+
+	############# Groupe de radio bouton Choix du projet ################
+
+	$cloneform_choix_noeuds.DataBindings.DefaultDataSourceUpdateMode = 0
+	$cloneform_choix_noeuds.Location = New-Object System.Drawing.Point(280,230)
+	$cloneform_choix_noeuds.Size = New-Object System.Drawing.Size(245,160)
+	$cloneform_choix_noeuds.TabIndex = 3
+	$cloneform_choix_noeuds.TabStop = $False
+	$cloneform_choix_noeuds.Text = “3. Choisir Noeuds :”
+	$cloneform_choix_noeuds.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
+
+	$cloneform_choix_noeuds.Controls.Add($cloneform_cmb_Choix_Noeud_src)
+	$cloneform_choix_noeuds.Controls.Add($cloneform_cmb_Choix_Noeud_dest)
+	$cloneform_choix_noeuds.Controls.Add($cloneform_label_Noeud_src)
+	$cloneform_choix_noeuds.Controls.Add($cloneform_label_Noeud_dest)
+
+	# Appel de la fonction qui affiche les projets
+	# affiche_projets
+
+	##########################################################
+	############## GESTION DES EVENEMENTS ####################
+	
+	# Gestion event quand on clique sur le bouton Fermer
+	$cloneform_button_quit.Add_Click(
+	{
+		$form_clone_qemu.Close();
+	})
+
+	# Gestion event quand on clique sur le bouton Fermer
+	$cloneform_button_clone.Add_Click(
+	{
+		#Déclaration des variables
+		
+		# Vérifie si la vm GNS3 est joingnable et si les chemins existent
+		
+		ping_gns3_vm "$($cloneform_textbox_IPGns3vm.Text)"
+		$ip_vm_gns3="$($cloneform_textbox_IPGns3vm.Text)"
+		
+		if ( $gns3_proj_path_local -eq "" -or ! (Test-Path $gns3_proj_path_local) ) {
+			affiche_error "La variable gns3_proj_path_local n est pas definie !"
+			exit
+		}
+		if ( ! $cloneform_cmb_Choix_Projets_src.SelectedItem ) {
+			affiche_error "Aucun projet source selectionné !"
+			exit
+		}
+		$project_src_name=$($cloneform_cmb_Choix_Projets_src.SelectedItem.ToString())
+		
+		if ( ! $cloneform_cmb_Choix_Projets_dest.SelectedItem ) {
+			affiche_error "Aucun projet de destination selectionné !"
+			exit
+		}
+		$project_dest_name=$($cloneform_cmb_Choix_Projets_dest.SelectedItem.ToString())
+		
+		if ( ! $cloneform_cmb_Choix_Noeud_src.SelectedItem ) {
+			affiche_error "Aucun noeud source selectionné !"
+			exit
+		}
+		$noeud_src_name=$($cloneform_cmb_Choix_Noeud_src.SelectedItem.ToString())
+		
+		if ( ! $cloneform_cmb_Choix_Noeud_dest.SelectedItem ) {
+			affiche_error "Aucun noeud de destination selectionné !"
+			exit
+		}
+		$noeud_dest_name=$($cloneform_cmb_Choix_Noeud_dest.SelectedItem.ToString())
+	
+		# Chemin du fichier GNS3 du projet
+		$project_name_src=$project_src_name
+		$path_project_src=$($cloneform_textbox_ProjetPath.Text)
+		$project_file_path_src="$path_project_src\$project_name_src\$project_name_src.gns3"
+		
+		# Recuperation du contenu au format JSON du fichier de configuration du projet GNS3
+		$project_file_content_src=Get-Content "$project_file_path_src" | ConvertFrom-Json
+		$project_id_src=$project_file_content_src.project_id
+		
+		# Selection des noeuds
+		$image_project_src=$($project_file_content_src.topology.nodes) | Where-Object {$_.node_type -match "qemu"}
+		# $image_project_src=$image_project_src | select name,node_id
+		
+		if ( $project_src_name -eq $project_dest_name ) {
+		
+			$project_file_content_dest=$project_file_content_src
+			$project_id_dest=$project_file_content_dest.project_id
+			$image_project_dest=$image_project_src
+			
+			if ( $noeud_src_name -eq $noeud_dest_name ) {
+		
+				affiche_error "Selectionner un noeud différende pour la source et la destination"
+				exit
+				
+			}
+			
+			write-host
+			write-host "Le UUID du projet source et destination :" -ForegroundColor Green
+			write-host "	* $project_id_src"
+			
+		} else {
+		
+			# Chemin du fichier GNS3 du projet
+			$project_name_dest=$project_dest_name
+			$path_project_dest=$($cloneform_textbox_ProjetPath.Text)
+			$project_file_path_dest="$path_project_dest\$project_name_dest\$project_name_dest.gns3"
+			
+			# Recuperation du contenu au format JSON du fichier de configuration du projet GNS3
+			$project_file_content_dest=Get-Content "$project_file_path_dest" | ConvertFrom-Json
+			$project_id_dest=$project_file_content_dest.project_id
+			
+			# Selection des noeuds
+			$image_project_dest=$($project_file_path_dest.topology.nodes) | Where-Object {$_.node_type -match "qemu"}
+			
+			write-host
+			write-host "Le UUID du projet source :" -ForegroundColor Green
+			write-host "	* $project_id_src"
+			
+			write-host "Le UUID du projet destination :" -ForegroundColor Green
+			write-host "	* $project_id_dest"
+		}	
+				
+		# Récupération des UUID des images
+		$images_id_src=$(find_images_id "src" "$noeud_src_name")
+		$images_id_dest=$(find_images_id "dest" "$noeud_dest_name")
+		
+		$image_file_name_src="$($image_project_src.properties | Where-Object {$_.node_id -match $images_id_src}  | Select-Object -ExpandProperty hda_disk_image)"
+		$image_file_name_dest="$($image_project_dest.properties | Where-Object {$_.node_id -match $images_id_dest} | Select-Object -ExpandProperty hda_disk_image)"
+		
+		if ( ! ($image_file_name_src -eq $image_file_name_dest) ) {
+			
+			$msgBoxInput = [System.Windows.Forms.Messagebox]::Show("Le disque dur virtuel ne correspond pas à la même image ! Continuer ?",'VM Vmware','YesNo','Warning')
+
+			if ($msgBoxInput -eq 'No') {
+			
+				affiche_error "Clone de la VM $noeud_src_name échoue !"
+				exit
+				
+			}
+	
+		}
+		
+		$noeuds_path_src="$gns3_proj_path_vm/$project_id_src/project-files/qemu/$images_id_src"
+		$noeuds_path_dest="$gns3_proj_path_vm/$project_id_dest/project-files/qemu/$images_id_dest"
+		
+		# Calcul de l'espace disque
+		$free_space="$(ssh_command "df -h $gns3_proj_path_vm | grep -v '^Filesystem' | awk '{ print `$4 }'" "$false")" + "B"
+		$folder_space="$(ssh_command "du -sh $noeuds_path_src | awk '{ print `$1 }'" "$false")" + "B"
+		
+		$disk_size="{0:N1}" -f ($(Invoke-Expression $free_space) / 1000000000)
+		$vm_size="{0:N1}" -f ($(Invoke-Expression $folder_space) / 1000000000)
+		$vm_size_limit="{0:N1}" -f (($(Invoke-Expression $folder_space) + 8GB) / 1000000000)
+		$size_after_clone="{0:N1}" -f ($disk_size - $vm_size)
+		
+		if ( $vm_size -gt $disk_size ) {
+		
+			affiche_error "La taille du disque est insuffisante $disk_size GB pour exporter la VM : $vm_size GB !"
+			exit
+			
+		} elseif ( $vm_size_limit -gt $disk_size ) {
+			
+			Write-Host ""
+            Write-Warning "Il restera moins de $size_after_clone GB sur le disque !"
+			
+			$msgBoxInput = [System.Windows.Forms.Messagebox]::Show("Il restera moins de $size_after_clone GB sur le disque ! Continuer ?",'VM QEMU','YesNo','Warning')
+			
+			if ($msgBoxInput -eq 'No') {
+			
+				affiche_error "Clone de la VM $noeud_src_name échoue !"
+				exit
+				
+			}
+			
+		} else {
+		
+			Write-Host ""
+            Write-Host "La taille du disque est suffisante après clone de la VM : $size_after_clone GB !"
+			
+		}
+		
+		# Copie du disque dur virtuel		
+		write-host
+		write-host "Clone de la VM $noeud_src_name vers la VM $noeud_dest_name ..." -ForegroundColor Green
+
+		# Commande SSH avec Putty
+		& "$($putty_path)plink.exe" -pw "$pass_gns3_vm" "$user_gns3_vm@$ip_vm_gns3" "rsync --progress $noeuds_path_src/*.qcow2 $noeuds_path_dest/" | out-host
+	
+		if ( $? -eq 0 ) {
+			affiche_error "Commande rsync --progress $noeuds_path_src/*.qcow2 $noeuds_path_dest/ a echoue sur l hote $ip_vm_gns3 avec l utilisateur $user_gns3_vm !" | Out-Null
+			exit
+		}
+	
+		write-host "Clone de la VM $noeud_src_name reussi !" -ForegroundColor Green
+
+	})
+	
+	$cloneform_cmb_Choix_Projets_src.add_SelectedIndexChanged({
+
+		if ( $cloneform_cmb_Choix_Projets_dest.SelectedIndex -eq -1 ) {
+		
+			$cloneform_cmb_Choix_Projets_dest.SelectedIndex = $cloneform_cmb_Choix_Projets_src.SelectedIndex
+		}
+		
+		$project_name=$($cloneform_cmb_Choix_Projets_src.SelectedItem.ToString())
+		$path_project=$($cloneform_textbox_ProjetPath.Text)
+		$cloneform_cmb_Choix_Noeud_src.Items.clear()
+		affiche_noeuds "$path_project\$project_name\$project_name.gns3" '$cloneform_cmb_Choix_Noeud_src.Items.Add($images)'
+		
+	})
+	
+	$cloneform_cmb_Choix_Projets_dest.add_SelectedIndexChanged({
+		
+		$project_name=$($cloneform_cmb_Choix_Projets_dest.SelectedItem.ToString())
+		$path_project=$($cloneform_textbox_ProjetPath.Text)
+		$cloneform_cmb_Choix_Noeud_dest.Items.clear()
+		affiche_noeuds "$path_project\$project_name\$project_name.gns3" '$cloneform_cmb_Choix_Noeud_dest.Items.Add($images)'
+		
+	})
+	
+	# Gestion event quand on clique sur le bouton Ping
+	$cloneform_button_IPPing.Add_Click(
+	{
+		
+		ping_gns3_vm "$($cloneform_textbox_IPGns3vm.Text)"
+		
+		[System.Windows.Forms.Messagebox]::Show('La VM GNS3 est Joignable !','VM GNS3','OK','Info')
+
+	})
+
+	# Gestion event quand on clique sur le bouton choisir
+	$cloneform_button_ProjetPath.Add_Click(
+	{
+		$openFolderDialog.Description      = "Selectionner le dossier des projets"
+		$ret = $openFolderDialog.ShowDialog()
+
+		if ($ret -ilike "ok") {
+		
+			$cloneform_textbox_ProjetPath.Text = $openFolderDialog.SelectedPath
+			
+			# Appel de la fonction qui affiche les projets
+			$cloneform_cmb_Choix_Projets_src.Items.clear()
+			affiche_projets "$($cloneform_textbox_ProjetPath.Text)" '$cloneform_cmb_Choix_Projets_src.Items.Add($_.name)'
+			$cloneform_cmb_Choix_Projets_dest.Items.clear()
+			affiche_projets "$($cloneform_textbox_ProjetPath.Text)" '$cloneform_cmb_Choix_Projets_dest.Items.Add($_.name)'
+		}
+	})
+
+	#################################################
+	# INSERTION DES COMPOSANTS
+	#################################################
+
+	# Ajout des composants a la Form
+	$form_clone_qemu.Controls.Add($cloneform_label_title)
+	$form_clone_qemu.Controls.Add($cloneform_button_clone)
+	$form_clone_qemu.Controls.Add($cloneform_button_quit)
+	$form_clone_qemu.Controls.Add($cloneform_choix_options)
+	$form_clone_qemu.Controls.Add($cloneform_choix_projets)
+	$form_clone_qemu.Controls.Add($cloneform_choix_noeuds)
+
+	# Affichage de la Windows
+	$form_clone_qemu.ShowDialog()
+
+}
+
 function About {
 
-    $statusBar.Text = "About"
+    $statusBar.Text = "A Propos"
 	
     # About Form Objects
     $aboutForm          = New-Object System.Windows.Forms.Form
@@ -497,11 +1060,11 @@ function About {
     # About Form
     $aboutForm.AcceptButton  = $aboutFormExit
     $aboutForm.CancelButton  = $aboutFormExit
-    $aboutForm.ClientSize    = "350, 125"
+    $aboutForm.ClientSize    = "350, 135"
     $aboutForm.ControlBox    = $false
     $aboutForm.ShowInTaskBar = $false
     $aboutForm.StartPosition = "CenterParent"
-    $aboutForm.Text          = "About GNS3_Project_Import_Export"
+    $aboutForm.Text          = "A Propos GNS3_Project_Import_Export"
     $aboutForm.Add_Load($aboutForm_Load)
 
     # About PictureBox
@@ -520,18 +1083,18 @@ function About {
 
     # About Text Label
     $aboutFormText.Location = "145, 55"
-    $aboutFormText.Size     = "300, 30"
-    $aboutFormText.Text     = "Fabien Mauhourat `n`r      Version 2.0"
+    $aboutFormText.Size     = "300, 40"
+    $aboutFormText.Text     = "Fabien Mauhourat `n`r      Version 2.1 `n`r Licence GPLv3"
     $aboutForm.Controls.Add($aboutFormText)
 
     # About Exit Button
-    $aboutFormExit.Location = "155, 85"
+    $aboutFormExit.Location = "155, 100"
     $aboutFormExit.Text     = "OK"
     $aboutForm.Controls.Add($aboutFormExit)
 
     $aboutForm.ShowDialog()
 	
-    $statusBar.Text = "Ready"
+    $statusBar.Text = "Prêt"
 }
 
 Write-Host "###########################################################################"
@@ -545,7 +1108,7 @@ Write-Host "####################################################################
 # Chargement des Windows Form
 Add-Type –AssemblyName System.Windows.Forms
 [Windows.Forms.Application]::EnableVisualStyles()     
-$host.ui.RawUI.WindowTitle = "Export de projet GNS3 v2.0 Fabien Mauhourat"
+$host.ui.RawUI.WindowTitle = "Export de projet GNS3 v2.1 Fabien Mauhourat"
 
 # Définission des objets de la fenetre
 $form = New-Object System.Windows.Forms.Form
@@ -554,60 +1117,62 @@ $form = New-Object System.Windows.Forms.Form
 $iconPS   = [Drawing.Icon]::ExtractAssociatedIcon((Get-Command powershell).Path)
 
 # Définision des buttons
-$button_Export = New-Object System.Windows.Forms.Button
-$button_Cancel = New-Object System.Windows.Forms.Button
-$button_quit = New-Object System.Windows.Forms.Button
-$button_ProjetPath = New-Object System.Windows.Forms.Button
-$button_ImagesPath = New-Object System.Windows.Forms.Button
-$button_TmpPath = New-Object System.Windows.Forms.Button
-$button_ExportPath = New-Object System.Windows.Forms.Button
-$button_IPPing = New-Object System.Windows.Forms.Button
+$button_Export 		= New-Object System.Windows.Forms.Button
+$button_DLimages 	= New-Object System.Windows.Forms.Button
+$button_quit 		= New-Object System.Windows.Forms.Button
+$button_ProjetPath 	= New-Object System.Windows.Forms.Button
+$button_ImagesPath 	= New-Object System.Windows.Forms.Button
+$button_TmpPath 	= New-Object System.Windows.Forms.Button
+$button_ExportPath 	= New-Object System.Windows.Forms.Button
+$button_IPPing 		= New-Object System.Windows.Forms.Button
 
 # Définission des textboxs
-$textbox_ProjetPath = New-Object System.Windows.Forms.TextBox
-$textbox_ImagesPath = New-Object System.Windows.Forms.TextBox
-$textbox_TmpPath = New-Object System.Windows.Forms.TextBox
-$textbox_ExportPath = New-Object System.Windows.Forms.TextBox
-$textbox_IPGns3vm = New-Object System.Windows.Forms.TextBox
+$textbox_ProjetPath 	= New-Object System.Windows.Forms.TextBox
+$textbox_ImagesPath 	= New-Object System.Windows.Forms.TextBox
+$textbox_TmpPath 		= New-Object System.Windows.Forms.TextBox
+$textbox_ExportPath 	= New-Object System.Windows.Forms.TextBox
+$textbox_IPGns3vm 		= New-Object System.Windows.Forms.TextBox
 
 # Définission des Labels
-$label_title = New-Object System.Windows.Forms.Label
-$label_ProjetPath = New-Object System.Windows.Forms.Label
-$label_ImagesPath = New-Object System.Windows.Forms.Label
-$label_TmpPath = New-Object System.Windows.Forms.Label
-$label_ExportPath = New-Object System.Windows.Forms.Label
-$label_IPGns3vm = New-Object System.Windows.Forms.Label
-$label_progressbar = New-Object System.Windows.Forms.Label
+$label_title 		= New-Object System.Windows.Forms.Label
+$label_ProjetPath 	= New-Object System.Windows.Forms.Label
+$label_ImagesPath 	= New-Object System.Windows.Forms.Label
+$label_TmpPath 		= New-Object System.Windows.Forms.Label
+$label_ExportPath 	= New-Object System.Windows.Forms.Label
+$label_IPGns3vm 	= New-Object System.Windows.Forms.Label
+$label_progressbar 	= New-Object System.Windows.Forms.Label
 
 # Définission des groupbox
-$groupBox_include_images = New-Object System.Windows.Forms.GroupBox
-$groupBox_archive_projet = New-Object System.Windows.Forms.GroupBox
-$choix_options = New-Object System.Windows.Forms.GroupBox
-$choix_projets= New-Object System.Windows.Forms.GroupBox
-$choix_compress_vms= New-Object System.Windows.Forms.GroupBox
+$groupBox_include_images 	= New-Object System.Windows.Forms.GroupBox
+$groupBox_archive_projet 	= New-Object System.Windows.Forms.GroupBox
+$choix_options 				= New-Object System.Windows.Forms.GroupBox
+$choix_projets				= New-Object System.Windows.Forms.GroupBox
+$choix_compress_vms			= New-Object System.Windows.Forms.GroupBox
 
 # Définission des Barres d'information d'avancement du script
-$statusBar = New-Object System.Windows.Forms.StatusBar
-$progress = New-Object System.Windows.Forms.ProgressBar
+$statusBar 	= New-Object System.Windows.Forms.StatusBar
+$progress 	= New-Object System.Windows.Forms.ProgressBar
 
 # Définission des ComboBox
-$cmb_Choix_Projets = New-Object System.Windows.Forms.ComboBox
-$cmb_compress_vms = New-Object System.Windows.Forms.ComboBox
-$openFolderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$cmb_Choix_Projets 	= New-Object System.Windows.Forms.ComboBox
+$cmb_compress_vms 	= New-Object System.Windows.Forms.ComboBox
+$openFolderDialog 	= New-Object System.Windows.Forms.FolderBrowserDialog
 
 # Définission des Buttons radio
-$include_images_no = New-Object System.Windows.Forms.RadioButton
+$include_images_no 	= New-Object System.Windows.Forms.RadioButton
 $include_images_yes = New-Object System.Windows.Forms.RadioButton
-$archive_projet_no = New-Object System.Windows.Forms.RadioButton
+$archive_projet_no 	= New-Object System.Windows.Forms.RadioButton
 $archive_projet_yes = New-Object System.Windows.Forms.RadioButton
 
 # Menu
-$menuMain         = New-Object System.Windows.Forms.MenuStrip
-$menuFile         = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuExit         = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuHelp         = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuAbout        = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuDoc		  = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuMain       = New-Object System.Windows.Forms.MenuStrip
+$menuFile       = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuCloneVM    = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuExit       = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuHelp       = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuAbout      = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuDoc		= New-Object System.Windows.Forms.ToolStripMenuItem
+$menuOnline     = New-Object System.Windows.Forms.ToolStripMenuItem
 
 #################################################
 # CONFIGURATION DE LA WINDOWS FORM
@@ -618,7 +1183,7 @@ $form.FormBorderStyle = 1
 $form.MaximizeBox = $False
 $form.MinimizeBox = $False
 $form.Icon = $iconPS
-$form.Text = "Export de projet GNS3 v2.0 Fabien Mauhourat"
+$form.Text = "Export de projet GNS3 v2.1 Fabien Mauhourat"
 $form.StartPosition= 1
 $form.Size = New-Object System.Drawing.Size(540,750)
 $form.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
@@ -629,13 +1194,13 @@ $form.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
 
 # Bouton monter
 $button_Export.Text = "Exporter Projet"
-$button_Export.Size = New-Object System.Drawing.Size(390,40)
+$button_Export.Size = New-Object System.Drawing.Size(185,40)
 $button_Export.Location = New-Object System.Drawing.Size(65,580)
 
 # Bouton dem
-$button_Cancel.Text = "Demonter l'image !"
-$button_Cancel.Size = New-Object System.Drawing.Size(185,40)
-$button_Cancel.Location = New-Object System.Drawing.Size(270,580)
+$button_DLimages.Text = "Télécharger images GNS3"
+$button_DLimages.Size = New-Object System.Drawing.Size(185,40)
+$button_DLimages.Location = New-Object System.Drawing.Size(270,580)
 
 # Bouton Quitter
 $button_quit.Text = "Fermer"
@@ -645,27 +1210,27 @@ $button_quit.Location = New-Object System.Drawing.Size(65,630)
 # Bouton ProjetPath
 $button_ProjetPath.Text = "..."
 $button_ProjetPath.Size = New-Object System.Drawing.Size(25,27)
-$button_ProjetPath.Location = New-Object System.Drawing.Size(440,47)
+$button_ProjetPath.Location = New-Object System.Drawing.Size(430,47)
 
 # Bouton ImagesPath
 $button_ImagesPath.Text = "..."
 $button_ImagesPath.Size = New-Object System.Drawing.Size(25,27)
-$button_ImagesPath.Location = New-Object System.Drawing.Size(440,97)
+$button_ImagesPath.Location = New-Object System.Drawing.Size(430,97)
 
 # Bouton TmpPath
 $button_TmpPath.Text = "..."
 $button_TmpPath.Size = New-Object System.Drawing.Size(25,27)
-$button_TmpPath.Location = New-Object System.Drawing.Size(440,147)
+$button_TmpPath.Location = New-Object System.Drawing.Size(430,147)
 
 # Bouton ExportPath
 $button_ExportPath.Text = "..."
 $button_ExportPath.Size = New-Object System.Drawing.Size(25,27)
-$button_ExportPath.Location = New-Object System.Drawing.Size(440,197)
+$button_ExportPath.Location = New-Object System.Drawing.Size(430,197)
 
 # Bouton Ping
 $button_IPPing.Text = "Ping"
 $button_IPPing.Size = New-Object System.Drawing.Size(40,27)
-$button_IPPing.Location = New-Object System.Drawing.Size(432,247)
+$button_IPPing.Location = New-Object System.Drawing.Size(422,247)
 
 # Label title
 $label_title.Location = New-Object System.Drawing.Point(170,33)
@@ -677,31 +1242,31 @@ $label_title.TabIndex = 1
 # TextBox ProjetPath
 $textbox_ProjetPath.AutoSize = $true
 $textbox_ProjetPath.Location = New-Object System.Drawing.Point(20,50)
-$textbox_ProjetPath.Size = New-Object System.Drawing.Size(405,25)
+$textbox_ProjetPath.Size = New-Object System.Drawing.Size(390,25)
 $textbox_ProjetPath.Text = $gns3_proj_path_local
 
 # TextBox ImagesPath
 $textbox_ImagesPath.AutoSize = $true
 $textbox_ImagesPath.Location = New-Object System.Drawing.Point(20,100)
-$textbox_ImagesPath.Size = New-Object System.Drawing.Size(405,10)
+$textbox_ImagesPath.Size = New-Object System.Drawing.Size(390,10)
 $textbox_ImagesPath.Text = $gns3_images_path_local
 
 # TextBox TmpPath
 $textbox_TmpPath.AutoSize = $true
 $textbox_TmpPath.Location = New-Object System.Drawing.Point(20,150)
-$textbox_TmpPath.Size = New-Object System.Drawing.Size(405,50)
+$textbox_TmpPath.Size = New-Object System.Drawing.Size(390,50)
 $textbox_TmpPath.Text = $temp_path
 
 # TextBox ExportPath
 $textbox_ExportPath.AutoSize = $true
 $textbox_ExportPath.Location = New-Object System.Drawing.Point(20,200)
-$textbox_ExportPath.Size = New-Object System.Drawing.Size(405,50)
+$textbox_ExportPath.Size = New-Object System.Drawing.Size(390,50)
 $textbox_ExportPath.Text = $export_project_path
 
 # TextBox IPGns3vm
 $textbox_IPGns3vm.AutoSize = $true
 $textbox_IPGns3vm.Location = New-Object System.Drawing.Point(20,250)
-$textbox_IPGns3vm.Size = New-Object System.Drawing.Size(405,50)
+$textbox_IPGns3vm.Size = New-Object System.Drawing.Size(390,50)
 $textbox_IPGns3vm.Text = $ip_vm_gns3
 
 # Label ProjetPath
@@ -739,7 +1304,7 @@ $statusBar.DataBindings.DefaultDataSourceUpdateMode = 0
 $statusBar.Location = New-Object System.Drawing.Point(0,680)
 $statusBar.Name = “statusBar”
 $statusBar.Size = New-Object System.Drawing.Size(440,23)
-$statusBar.Text = "Ready"
+$statusBar.Text = "Prêt"
 $statusBar.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,14,0,2,1)
 
 # Barre de progression
@@ -764,9 +1329,9 @@ $cmb_Choix_Projets.TabIndex        = 0
 $cmb_compress_vms.DataBindings.DefaultDataSourceUpdateMode = 0
 $cmb_compress_vms.AutoSize = 1
 $cmb_compress_vms.FormattingEnabled = $True
-$cmb_compress_vms.Location        = New-Object System.Drawing.Point(20,22)
+$cmb_compress_vms.Location        = New-Object System.Drawing.Point(50,22)
 $cmb_compress_vms.Name            = "cmb_compress_vms"
-$cmb_compress_vms.Size            = New-Object System.Drawing.Size(160,20)
+$cmb_compress_vms.Size            = New-Object System.Drawing.Size(100,20)
 $cmb_compress_vms.TabIndex        = 0
 
 foreach ($compress in "1","5","9") {
@@ -775,79 +1340,14 @@ foreach ($compress in "1","5","9") {
 
 $cmb_compress_vms.SelectedIndex = 2
 
-
-############## Groupe de radio bouton Include Image ###################
-
-$groupBox_include_images.DataBindings.DefaultDataSourceUpdateMode = 0
-$groupBox_include_images.Location = New-Object System.Drawing.Point(20,447)
-$groupBox_include_images.Size = New-Object System.Drawing.Size(230,50)
-$groupBox_include_images.TabIndex = 3
-$groupBox_include_images.TabStop = $False
-$groupBox_include_images.Text = “4. Inclure les Images et containers”
-$groupBox_include_images.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
-
-$include_images_no.DataBindings.DefaultDataSourceUpdateMode = 0
-$include_images_no.Location = New-Object System.Drawing.Point(130,20)
-$include_images_no.Size = New-Object System.Drawing.Size(60,20)
-$include_images_no.Name = “radioButton2”
-$include_images_no.TabIndex = 1
-$include_images_no.TabStop = $True
-$include_images_no.Text = “Non”
-$include_images_no.UseVisualStyleBackColor = $True
-
-$include_images_yes.DataBindings.DefaultDataSourceUpdateMode = 0
-$include_images_yes.Location = New-Object System.Drawing.Point(50,20)
-$include_images_yes.Size = New-Object System.Drawing.Size(70,20)
-$include_images_yes.Name = “radioButton1”
-$include_images_yes.TabIndex = 0
-$include_images_yes.TabStop = $True
-$include_images_yes.Text = “Oui”
-$include_images_yes.UseVisualStyleBackColor = $True
-$include_images_yes.checked =$True
-
-$groupBox_include_images.Controls.Add($include_images_no)
-$groupBox_include_images.Controls.Add($include_images_yes)
-
-############# Groupe de radio bouton Archive projet ################
-
-$groupBox_archive_projet.DataBindings.DefaultDataSourceUpdateMode = 0
-$groupBox_archive_projet.Location = New-Object System.Drawing.Point(270,447)
-$groupBox_archive_projet.Size = New-Object System.Drawing.Size(230,50)
-$groupBox_archive_projet.TabIndex = 3
-$groupBox_archive_projet.TabStop = $False
-$groupBox_archive_projet.Text = “5. Archiver le projet”
-$groupBox_archive_projet.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
-
-$archive_projet_no.DataBindings.DefaultDataSourceUpdateMode = 0
-$archive_projet_no.Location = New-Object System.Drawing.Point(130,20)
-$archive_projet_no.Size = New-Object System.Drawing.Size(80,20)
-$archive_projet_no.Name = “radioButton2”
-$archive_projet_no.TabIndex = 1
-$archive_projet_no.TabStop = $True
-$archive_projet_no.Text = “Non”
-$archive_projet_no.UseVisualStyleBackColor = $True
-
-$archive_projet_yes.DataBindings.DefaultDataSourceUpdateMode = 0
-$archive_projet_yes.Location = New-Object System.Drawing.Point(50,15)
-$archive_projet_yes.Size = New-Object System.Drawing.Size(90,30)
-$archive_projet_yes.Name = “radioButton1”
-$archive_projet_yes.TabIndex = 0
-$archive_projet_yes.TabStop = $True
-$archive_projet_yes.Text = “Oui”
-$archive_projet_yes.UseVisualStyleBackColor = $True
-$archive_projet_yes.checked =$True
-
-$groupBox_archive_projet.Controls.Add($archive_projet_no)
-$groupBox_archive_projet.Controls.Add($archive_projet_yes)
-
 ############# Groupe de radio bouton Choix de la configuration ################
 
 $choix_options.DataBindings.DefaultDataSourceUpdateMode = 0
 $choix_options.Location = New-Object System.Drawing.Point(20,67)
 $choix_options.Size = New-Object System.Drawing.Size(480,290)
-$choix_options.TabIndex = 3
+$choix_options.TabIndex = 1
 $choix_options.TabStop = $False
-$choix_options.Text = “1. Choisir les options de configuration”
+$choix_options.Text = “1. Options de configuration”
 $choix_options.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
 
 $choix_options.Controls.Add($textbox_ProjetPath)
@@ -871,7 +1371,7 @@ $choix_options.Controls.Add($label_ExportPath)
 $choix_projets.DataBindings.DefaultDataSourceUpdateMode = 0
 $choix_projets.Location = New-Object System.Drawing.Point(20,372)
 $choix_projets.Size = New-Object System.Drawing.Size(245,60)
-$choix_projets.TabIndex = 3
+$choix_projets.TabIndex = 2
 $choix_projets.TabStop = $False
 $choix_projets.Text = “2. Choisir Projet :”
 $choix_projets.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
@@ -879,7 +1379,8 @@ $choix_projets.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,
 $choix_projets.Controls.Add($cmb_Choix_Projets)
 
 # Appel de la fonction qui affiche les projets
-affiche_projets
+$cmb_Choix_Projets.Items.clear()
+affiche_projets "$($textbox_ProjetPath.Text)" '$cmb_Choix_Projets.Items.Add($_.name)'
 
 ############# Groupe de radio bouton Compression des Vms ################
 
@@ -893,34 +1394,127 @@ $choix_compress_vms.Font = New-Object System.Drawing.Font(“Microsoft Sans Seri
 
 $choix_compress_vms.Controls.Add($cmb_compress_vms)
 
+############## Groupe de radio bouton Include Image ###################
+
+$groupBox_include_images.DataBindings.DefaultDataSourceUpdateMode = 0
+$groupBox_include_images.Location = New-Object System.Drawing.Point(20,447)
+$groupBox_include_images.Size = New-Object System.Drawing.Size(230,50)
+$groupBox_include_images.TabIndex = 4
+$groupBox_include_images.TabStop = $False
+$groupBox_include_images.Text = “4. Inclure les Images et containers”
+$groupBox_include_images.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
+
+$include_images_no.DataBindings.DefaultDataSourceUpdateMode = 0
+$include_images_no.Location = New-Object System.Drawing.Point(130,20)
+$include_images_no.Size = New-Object System.Drawing.Size(60,20)
+$include_images_no.TabIndex = 0
+$include_images_no.TabStop = $True
+$include_images_no.Text = “Non”
+$include_images_no.UseVisualStyleBackColor = $True
+
+if ( $IncludeImages -ne $true ) {
+	$include_images_no.checked=$True
+}
+
+$include_images_yes.DataBindings.DefaultDataSourceUpdateMode = 0
+$include_images_yes.Location = New-Object System.Drawing.Point(50,20)
+$include_images_yes.Size = New-Object System.Drawing.Size(70,20)
+$include_images_yes.TabIndex = 1
+$include_images_yes.TabStop = $True
+$include_images_yes.Text = “Oui”
+$include_images_yes.UseVisualStyleBackColor = $True
+
+if ( $IncludeImages -eq $true ) {
+	$include_images_yes.checked=$True
+}
+
+$groupBox_include_images.Controls.Add($include_images_no)
+$groupBox_include_images.Controls.Add($include_images_yes)
+
+############# Groupe de radio bouton Archive projet ################
+
+$groupBox_archive_projet.DataBindings.DefaultDataSourceUpdateMode = 0
+$groupBox_archive_projet.Location = New-Object System.Drawing.Point(270,447)
+$groupBox_archive_projet.Size = New-Object System.Drawing.Size(230,50)
+$groupBox_archive_projet.TabIndex = 5
+$groupBox_archive_projet.TabStop = $False
+$groupBox_archive_projet.Text = “5. Archiver le projet”
+$groupBox_archive_projet.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
+
+$archive_projet_no.DataBindings.DefaultDataSourceUpdateMode = 0
+$archive_projet_no.Location = New-Object System.Drawing.Point(130,20)
+$archive_projet_no.Size = New-Object System.Drawing.Size(80,20)
+$archive_projet_no.TabIndex = 0
+$archive_projet_no.TabStop = $True
+$archive_projet_no.Text = “Non”
+$archive_projet_no.UseVisualStyleBackColor = $True
+
+if ( $ArchiveProjet -ne $true ) {
+	$archive_projet_no.checked=$True
+}
+
+$archive_projet_yes.DataBindings.DefaultDataSourceUpdateMode = 0
+$archive_projet_yes.Location = New-Object System.Drawing.Point(50,15)
+$archive_projet_yes.Size = New-Object System.Drawing.Size(90,30)
+$archive_projet_yes.TabIndex = 1
+$archive_projet_yes.TabStop = $True
+$archive_projet_yes.Text = “Oui”
+$archive_projet_yes.UseVisualStyleBackColor = $True
+
+if ( $ArchiveProjet -eq $true ) {
+	$archive_projet_yes.checked=$True
+}
+
+$groupBox_archive_projet.Controls.Add($archive_projet_no)
+$groupBox_archive_projet.Controls.Add($archive_projet_yes)
+
 #################### Main Menu ######################
 
 # Main Menu Bar
 $form.Controls.Add($menuMain)
 
-# Menu Options - File
-$menuFile.Text = "&File"
+# Menu Options - Fichier
+$menuFile.Text = "&Fichier"
 [void]$menuMain.Items.Add($menuFile)
 
-# Menu Options - File / Exit
+# Menu Options - Fichier / Clone Qemu VM
+$menuCloneVM.ShortcutKeys = "Control, A"
+$menuCloneVM.Text = "&Clone Qemu VM"
+$menuCloneVM.Add_Click({clone_qemu_vm})
+[void]$menuFile.DropDownItems.Add($menuCloneVM)
+
+# Menu Options - Fichier / Quitter
 $menuExit.ShortcutKeys = "Control, Q"
-$menuExit.Text         = "&Exit"
+$menuExit.Text = "&Quitter"
 $menuExit.Add_Click({$form.Close()})
 [void]$menuFile.DropDownItems.Add($menuExit)
 
-# Menu Options - Help
-$menuHelp.Text      = "&Help"
+# Menu Options - Aide
+$menuHelp.Text      = "&Aide"
 [void]$menuMain.Items.Add($menuHelp)
 
-# Menu Options - Help / About
-# $menuDoc.Image     = [System.Drawing.SystemIcons]::Information
-$menuDoc.Text      = "Documentation"
-$menuDoc.Add_Click({Start-Process https://github.com/FabienMht/GNS3_Project_Import_Export})
+# Menu Options - Aide / Documentation
+$menuDoc.Image     = [System.Drawing.SystemIcons]::Information
+$menuDoc.Text      = "Documentation Script"
+
+$menuDoc.Add_Click({
+	write-host "Aide script d Export :" -ForegroundColor Green
+	Get-Help "$PSScriptRoot\$script_name" | out-host
+})
 [void]$menuHelp.DropDownItems.Add($menuDoc)
 
-# Menu Options - Help / About
+# Menu Options - Aide / Documentation
+$menuOnline.Image     = [System.Drawing.SystemIcons]::Information
+$menuOnline.Text      = "Documentation en ligne"
+
+$menuOnline.Add_Click({
+	Start-Process https://github.com/FabienMht/GNS3_Project_Import_Export
+})
+[void]$menuHelp.DropDownItems.Add($menuOnline)
+
+# Menu Options - Aide / A propos
 $menuAbout.Image     = [System.Drawing.SystemIcons]::Information
-$menuAbout.Text      = "About MenuStrip"
+$menuAbout.Text      = "A propos de GNS3-Import-Export"
 $menuAbout.Add_Click({About})
 [void]$menuHelp.DropDownItems.Add($menuAbout)
 
@@ -939,14 +1533,83 @@ $button_IPPing.Add_Click(
 	$statusBar.Text = "Test de connexion à la VM GNS3"
 	
 	# Vérifie si la vm GNS3 est joingnable et si les chemins existent
-    if ( ! (ping $textbox_IPGns3vm.Text -n 2 | Select-String "TTL=") ) {
-        affiche_error "La vm GNS3 $ip_vm_gns3 n est pas accessible !"
-        exit
-    }
+	ping_gns3_vm "$($textbox_IPGns3vm.Text)"
 	
 	[System.Windows.Forms.Messagebox]::Show('La VM GNS3 est Joignable !','VM GNS3','OK','Info')
 	
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
+})
+
+# Gestion event quand on clique sur le bouton Télécharger images VM GNS3
+$button_DLimages.Add_Click(
+{
+	$statusBar.Text = "Téléchargement des images de la VM GNS3"
+	$progress.Value = 0
+	
+	# Import des images du project
+
+	$ip_vm_gns3=$textbox_IPGns3vm.Text
+	$gns3_images_path_local=$textbox_ImagesPath.Text
+	$progress_images=0
+
+	Write-Host ""
+	Write-Host "1. Import des images dans $gns3_images_path_local en cours :" -ForegroundColor Green
+
+	# Copie de toutes les images du projet dans la VM GNS3
+	foreach ($folder in "QEMU","IOU","IOS") {
+
+		# Si dossier d'image vide passage au dossier suivant
+		$images_local=Get-ChildItem "$gns3_images_path_local\$folder"
+		$images_vm=ssh_command "ls $gns3_images_path_vm/$folder | grep -v 'iso'" | Where-Object {$_ -notmatch "md5sum"}
+		$images_count=$($images_vm | Measure-Object | Select-Object -ExpandProperty Count)
+		$progress_count= 33.33 / $images_count
+		$compteur_images=0
+		
+		if ( "$images_vm" -eq "" ) {
+			continue
+		}
+
+		Write-Host ""
+		Write-Host "Verification des images $folder ..."  -ForegroundColor Green
+
+		# Pour le reste des images IOS,IOU,QEMU
+		ForEach ($images_ref in $images_vm) {
+			$test_images=0
+			$compteur_images+=1
+			
+			# Vérifie si l'image est déjà présente sur la vm GNS3
+			ForEach ($images_dest in $images_local) {
+
+				if ("$images_ref" -like "$images_dest") {
+					$test_images=1
+					break
+				}
+			}
+
+			if ($test_images -ne 1) {
+
+				Write-Host ""
+				Write-Host "$compteur_images/$images_count Import de l image $images_ref en cours !"
+				
+				$statusBar.Text = "$compteur_images/$images_count Import de l image $images_ref"
+				
+				# Copue de l'image sur la VM GNS3 dans le bon dossier
+				ssh_copie "$gns3_images_path_vm/$folder/$images_ref" "$gns3_images_path_local\$folder" "$false"
+
+			}
+			$progress_images= $progress_images + $progress_count
+			$progress.Value = $progress_images
+		}
+	
+	}
+
+	Write-Host ""
+	Write-Host "1. Import des images dans $gns3_images_path_local terminee avec succes !" -ForegroundColor Green
+	
+	[System.Windows.Forms.Messagebox]::Show("Les images ont été importer dans $gns3_images_path_local",'VM GNS3','OK','Info')
+	
+	$statusBar.Text = "Prêt"
+	$progress.Value = 0
 })
 
 # Gestion event quand on clique sur le bouton OK
@@ -1327,7 +1990,7 @@ $button_Export.Add_Click(
 	[System.Windows.Forms.Messagebox]::Show("L exportation est terminée : $script_time",'Exportation','OK','Info')
 	
 	$progress.Value = 0
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 # Gestion event quand on clique sur le bouton choisir
@@ -1341,7 +2004,8 @@ $button_ProjetPath.Add_Click(
         $textbox_ProjetPath.Text = $openFolderDialog.SelectedPath
 		
 		# Appel de la fonction qui affiche les projets
-		affiche_projets
+		$cmb_Choix_Projets.Items.clear()
+		affiche_projets "$($textbox_ProjetPath.Text)" '$cmb_Choix_Projets.Items.Add($_.name)'
     }
 })
 
@@ -1390,7 +2054,7 @@ $form.Controls.Add($label_title)
 $form.Controls.Add($label_progressbar)
 $form.Controls.Add($progress)
 $form.Controls.Add($button_Export)
-# $form.Controls.Add($button_Cancel)
+$form.Controls.Add($button_DLimages)
 $form.Controls.Add($button_quit)
 $form.Controls.Add($groupBox_include_images)
 $form.Controls.Add($groupBox_archive_projet)

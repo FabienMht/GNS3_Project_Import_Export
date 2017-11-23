@@ -36,12 +36,12 @@
             ...
 
 .EXAMPLE
-    Import par défaut les Vms et les images avec le projet
-   ./Nom du script
+    Inclut par défaut les Vms et les images avec le projet :
+	> ./Nom du script
 
 .EXAMPLE
-    Pour lancer le script et définir les variables en ligne de commande sans modifier le script
-    ./Nom du script -ProjectPath "Path" -ProjectZip "Path" -IPGns3vm "Ip de la VM GNS3" -VmwareVmFolder "Path" -TmpPath "Path"
+    Pour lancer le script et définir les variables en ligne de commande sans modifier le script :
+	> ./Nom du script -ProjectPath "Path" -ImagesPath "Path" -ProjectZip "Path" -IPGns3vm "Ip de la VM GNS3" -VmwareVmFolder "Path" -TmpPath "Path"
 
 .INPUTS
    Pas d'entrée en pipe possible
@@ -50,18 +50,20 @@
     https://github.com/FabienMht/GNS3_Project_Import_Export
  
 .NOTES
-    NAME :			Import projets GNS3
-    AUTHOR :			Fabien Mauhourat
-    Version GNS3 :	2.0.3
-
+    NAME            : Import projets GNS3
+    AUTHOR          : Fabien Mauhourat
+    Version GNS3    : 2.0.3
+	Tester sur      : Windows 10
+	
     VERSION HISTORY:
 
     1.0     2017.09.12   Fabien MAUHOURAT	Initial Version
     1.1     2017.09.28   Fabien MAUHOURAT   Ajout de la compatibilité Vbox et de la fonction de calcul de l'espace disque
-	2.0		2017.11.19   Fabien MAUHOURAT   Ajout de la GUI et correction de BUGs changement d'adaptateur et export import de VM Vbox '
-											et amélioration export de container docker et telechargement automatique de putty
-											Possibilité d'importer des projets soit au format zip soit sans compression
-
+    2.0     2017.11.19   Fabien MAUHOURAT   Ajout de la GUI et correction de BUGs changement d'adaptateur et export import de VM Vbox '
+                                            et amélioration export de container docker et telechargement automatique de putty
+                                            Possibilité d'importer des projets soit au format zip soit sans compression
+	2.1     2017.11.23   Fabien MAUHOURAT	Correction de BUGs
+	
 #>
 
 # Définition des variables
@@ -103,7 +105,8 @@ param (
     [string]$user_gns3_vm="gns3",
     [string]$vmware_path_ovftool="C:\Program Files (x86)\VMware\VMware Workstation",
     [string]$vbox_path_ovftool="C:\Program Files\Oracle\VirtualBox\VBoxManage.exe",
-	[string]$putty_path=""
+	[string]$putty_path="",
+	[string]$script_name=$MyInvocation.MyCommand.Name
 
 )
 
@@ -469,7 +472,7 @@ function affiche_projets {
 
 function About {
 
-    $statusBar.Text = "About"
+    $statusBar.Text = "A Propos"
 	
     # About Form Objects
     $aboutForm          = New-Object System.Windows.Forms.Form
@@ -481,11 +484,11 @@ function About {
     # About Form
     $aboutForm.AcceptButton  = $aboutFormExit
     $aboutForm.CancelButton  = $aboutFormExit
-    $aboutForm.ClientSize    = "350, 125"
+    $aboutForm.ClientSize    = "350, 135"
     $aboutForm.ControlBox    = $false
     $aboutForm.ShowInTaskBar = $false
     $aboutForm.StartPosition = "CenterParent"
-    $aboutForm.Text          = "About GNS3_Project_Import_Export"
+    $aboutForm.Text          = "A Propos GNS3_Project_Import_Export"
     $aboutForm.Add_Load($aboutForm_Load)
 
     # About PictureBox
@@ -502,20 +505,19 @@ function About {
     $aboutFormNameLabel.Text     = "        Script d'exportation et `n`r d'importation de projets GNS3"
     $aboutForm.Controls.Add($aboutFormNameLabel)
 
-    # About Text Label
     $aboutFormText.Location = "145, 55"
-    $aboutFormText.Size     = "300, 30"
-    $aboutFormText.Text     = "Fabien Mauhourat `n`r      Version 2.0"
+    $aboutFormText.Size     = "300, 40"
+    $aboutFormText.Text     = "Fabien Mauhourat `n`r      Version 2.1 `n`r Licence GPLv3"
     $aboutForm.Controls.Add($aboutFormText)
 
     # About Exit Button
-    $aboutFormExit.Location = "155, 85"
+    $aboutFormExit.Location = "155, 100"
     $aboutFormExit.Text     = "OK"
     $aboutForm.Controls.Add($aboutFormExit)
 
     $aboutForm.ShowDialog()
 	
-    $statusBar.Text = "Ready"
+    $statusBar.Text = "Prêt"
 }
 
 Write-Host "###########################################################################"
@@ -530,7 +532,7 @@ Write-Host "####################################################################
 Add-Type –AssemblyName System.Windows.Forms
 [Windows.Forms.Application]::EnableVisualStyles()    
 Add-Type -assembly "system.io.compression.filesystem" 
-$host.ui.RawUI.WindowTitle = "Import de projet GNS3 v2.0 Fabien Mauhourat"
+$host.ui.RawUI.WindowTitle = "Import de projet GNS3 v2.1 Fabien Mauhourat"
 
 # Définission des objets de la fenetre
 $form = New-Object System.Windows.Forms.Form
@@ -538,53 +540,54 @@ $form = New-Object System.Windows.Forms.Form
 $iconPS   = [Drawing.Icon]::ExtractAssociatedIcon((Get-Command powershell).Path)
 
 # Définision des buttons
-$button_Export = New-Object System.Windows.Forms.Button
-$button_Cancel = New-Object System.Windows.Forms.Button
-$button_quit = New-Object System.Windows.Forms.Button
-$button_ProjetPath = New-Object System.Windows.Forms.Button
-$button_ImagesPath = New-Object System.Windows.Forms.Button
-$button_TmpPath = New-Object System.Windows.Forms.Button
-$button_ExportPath = New-Object System.Windows.Forms.Button
-$button_VMPath = New-Object System.Windows.Forms.Button
-$button_IPPing = New-Object System.Windows.Forms.Button
+$button_Export 		= New-Object System.Windows.Forms.Button
+$button_Cancel 		= New-Object System.Windows.Forms.Button
+$button_quit 		= New-Object System.Windows.Forms.Button
+$button_ProjetPath 	= New-Object System.Windows.Forms.Button
+$button_ImagesPath 	= New-Object System.Windows.Forms.Button
+$button_TmpPath 	= New-Object System.Windows.Forms.Button
+$button_ExportPath 	= New-Object System.Windows.Forms.Button
+$button_VMPath 		= New-Object System.Windows.Forms.Button
+$button_IPPing 		= New-Object System.Windows.Forms.Button
 
 # Définission des textboxs
-$textbox_ProjetPath = New-Object System.Windows.Forms.TextBox
-$textbox_ImagesPath = New-Object System.Windows.Forms.TextBox
-$textbox_TmpPath = New-Object System.Windows.Forms.TextBox
-$textbox_ExportPath = New-Object System.Windows.Forms.TextBox
-$textbox_VMPath = New-Object System.Windows.Forms.TextBox
-$textbox_IPGns3vm = New-Object System.Windows.Forms.TextBox
+$textbox_ProjetPath 	= New-Object System.Windows.Forms.TextBox
+$textbox_ImagesPath 	= New-Object System.Windows.Forms.TextBox
+$textbox_TmpPath 		= New-Object System.Windows.Forms.TextBox
+$textbox_ExportPath 	= New-Object System.Windows.Forms.TextBox
+$textbox_VMPath 		= New-Object System.Windows.Forms.TextBox
+$textbox_IPGns3vm 		= New-Object System.Windows.Forms.TextBox
 
 # Définission des Labels
-$label_title = New-Object System.Windows.Forms.Label
-$label_ProjetPath = New-Object System.Windows.Forms.Label
-$label_ImagesPath = New-Object System.Windows.Forms.Label
-$label_TmpPath = New-Object System.Windows.Forms.Label
-$label_ExportPath = New-Object System.Windows.Forms.Label
-$label_VMPath = New-Object System.Windows.Forms.Label
-$label_IPGns3vm = New-Object System.Windows.Forms.Label
-$label_progressbar = New-Object System.Windows.Forms.Label
+$label_title 		= New-Object System.Windows.Forms.Label
+$label_ProjetPath 	= New-Object System.Windows.Forms.Label
+$label_ImagesPath 	= New-Object System.Windows.Forms.Label
+$label_TmpPath 		= New-Object System.Windows.Forms.Label
+$label_ExportPath 	= New-Object System.Windows.Forms.Label
+$label_VMPath 		= New-Object System.Windows.Forms.Label
+$label_IPGns3vm 	= New-Object System.Windows.Forms.Label
+$label_progressbar 	= New-Object System.Windows.Forms.Label
 
 # Définission des groupbox
-$choix_options = New-Object System.Windows.Forms.GroupBox
-$choix_projets= New-Object System.Windows.Forms.GroupBox
+$choix_options 	= New-Object System.Windows.Forms.GroupBox
+$choix_projets	= New-Object System.Windows.Forms.GroupBox
 
 # Définission des Barres d'information d'avancement du script
-$statusBar = New-Object System.Windows.Forms.StatusBar
-$progress = New-Object System.Windows.Forms.ProgressBar
+$statusBar 	= New-Object System.Windows.Forms.StatusBar
+$progress 	= New-Object System.Windows.Forms.ProgressBar
 
 # Définission des ComboBox
-$cmb_Choix_Projets = New-Object System.Windows.Forms.ComboBox
-$openFolderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$cmb_Choix_Projets 	= New-Object System.Windows.Forms.ComboBox
+$openFolderDialog 	= New-Object System.Windows.Forms.FolderBrowserDialog
 
 # Menu
-$menuMain         = New-Object System.Windows.Forms.MenuStrip
-$menuFile         = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuExit         = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuHelp         = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuAbout        = New-Object System.Windows.Forms.ToolStripMenuItem
-$menuDoc		  = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuMain    = New-Object System.Windows.Forms.MenuStrip
+$menuFile    = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuExit    = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuHelp    = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuAbout   = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuDoc	 = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuOnline  = New-Object System.Windows.Forms.ToolStripMenuItem
 
 #################################################
 # CONFIGURATION DE LA WINDOWS FORM
@@ -595,7 +598,7 @@ $form.FormBorderStyle = 1
 $form.MaximizeBox = $False
 $form.MinimizeBox = $False
 $form.Icon = $iconPS
-$form.Text = "Import de projet GNS3 v2.0 Fabien Mauhourat"
+$form.Text = "Import de projet GNS3 v2.1 Fabien Mauhourat"
 $form.StartPosition= 1
 $form.Size = New-Object System.Drawing.Size(540,750)
 $form.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
@@ -622,32 +625,32 @@ $button_quit.Location = New-Object System.Drawing.Size(65,625)
 # Bouton ProjetPath
 $button_ProjetPath.Text = "..."
 $button_ProjetPath.Size = New-Object System.Drawing.Size(25,27)
-$button_ProjetPath.Location = New-Object System.Drawing.Size(440,47)
+$button_ProjetPath.Location = New-Object System.Drawing.Size(430,47)
 
 # Bouton ImagesPath
 $button_ImagesPath.Text = "..."
 $button_ImagesPath.Size = New-Object System.Drawing.Size(25,27)
-$button_ImagesPath.Location = New-Object System.Drawing.Size(440,97)
+$button_ImagesPath.Location = New-Object System.Drawing.Size(430,97)
 
 # Bouton TmpPath
 $button_TmpPath.Text = "..."
 $button_TmpPath.Size = New-Object System.Drawing.Size(25,27)
-$button_TmpPath.Location = New-Object System.Drawing.Size(440,147)
+$button_TmpPath.Location = New-Object System.Drawing.Size(430,147)
 
 # Bouton ExportPath
 $button_ExportPath.Text = "..."
 $button_ExportPath.Size = New-Object System.Drawing.Size(25,27)
-$button_ExportPath.Location = New-Object System.Drawing.Size(440,197)
+$button_ExportPath.Location = New-Object System.Drawing.Size(430,197)
 
 # Bouton VMPath
 $button_VMPath.Text = "..."
 $button_VMPath.Size = New-Object System.Drawing.Size(25,27)
-$button_VMPath.Location = New-Object System.Drawing.Size(440,247)
+$button_VMPath.Location = New-Object System.Drawing.Size(430,247)
 
 # Bouton Ping
 $button_IPPing.Text = "Ping"
 $button_IPPing.Size = New-Object System.Drawing.Size(40,27)
-$button_IPPing.Location = New-Object System.Drawing.Size(432,297)
+$button_IPPing.Location = New-Object System.Drawing.Size(422,297)
 
 # Label title
 $label_title.Location = New-Object System.Drawing.Point(170,40)
@@ -659,38 +662,38 @@ $label_title.TabIndex = 1
 # TextBox ProjetPath
 $textbox_ProjetPath.AutoSize = $true
 $textbox_ProjetPath.Location = New-Object System.Drawing.Point(20,50)
-$textbox_ProjetPath.Size = New-Object System.Drawing.Size(405,25)
+$textbox_ProjetPath.Size = New-Object System.Drawing.Size(390,25)
 $textbox_ProjetPath.Text = $gns3_proj_path_local
 
 # TextBox ImagesPath
 $textbox_ImagesPath.AutoSize = $true
 $textbox_ImagesPath.Location = New-Object System.Drawing.Point(20,100)
-$textbox_ImagesPath.Size = New-Object System.Drawing.Size(405,10)
+$textbox_ImagesPath.Size = New-Object System.Drawing.Size(390,10)
 $textbox_ImagesPath.Text = $gns3_images_path_local
 
 # TextBox TmpPath
 $textbox_TmpPath.AutoSize = $true
 $textbox_TmpPath.Location = New-Object System.Drawing.Point(20,150)
-$textbox_TmpPath.Size = New-Object System.Drawing.Size(405,50)
+$textbox_TmpPath.Size = New-Object System.Drawing.Size(390,50)
 $textbox_TmpPath.Text = $temp_path
 
 # TextBox ExportPath
 $textbox_ExportPath.AutoSize = $true
 $textbox_ExportPath.Location = New-Object System.Drawing.Point(20,200)
-$textbox_ExportPath.Size = New-Object System.Drawing.Size(405,50)
+$textbox_ExportPath.Size = New-Object System.Drawing.Size(390,50)
 $textbox_ExportPath.Text = $gns3_proj_path_src
 # $textbox_ExportPath.Text = "C:\Temp"
 
 # TextBox VMPath
 $textbox_VMPath.AutoSize = $true
 $textbox_VMPath.Location = New-Object System.Drawing.Point(20,250)
-$textbox_VMPath.Size = New-Object System.Drawing.Size(405,50)
+$textbox_VMPath.Size = New-Object System.Drawing.Size(390,50)
 $textbox_VMPath.Text = $vmware_path_vm_folder
 
 # TextBox IPGns3vm
 $textbox_IPGns3vm.AutoSize = $true
 $textbox_IPGns3vm.Location = New-Object System.Drawing.Point(20,300)
-$textbox_IPGns3vm.Size = New-Object System.Drawing.Size(405,50)
+$textbox_IPGns3vm.Size = New-Object System.Drawing.Size(390,50)
 $textbox_IPGns3vm.Text = $ip_vm_gns3
 
 # Label ProjetPath
@@ -733,7 +736,7 @@ $statusBar.DataBindings.DefaultDataSourceUpdateMode = 0
 $statusBar.Location = New-Object System.Drawing.Point(0,680)
 $statusBar.Name = “statusBar”
 $statusBar.Size = New-Object System.Drawing.Size(440,23)
-$statusBar.Text = "Ready"
+$statusBar.Text = "Prêt"
 $statusBar.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,14,0,2,1)
 
 # Barre de progression
@@ -751,7 +754,7 @@ $cmb_Choix_Projets.AutoSize = 1
 $cmb_Choix_Projets.FormattingEnabled = $True
 $cmb_Choix_Projets.Location        = New-Object System.Drawing.Point(20,22)
 $cmb_Choix_Projets.Name            = "cmb_Choix_Projets"
-$cmb_Choix_Projets.Size            = New-Object System.Drawing.Size(405,20)
+$cmb_Choix_Projets.Size            = New-Object System.Drawing.Size(390,20)
 $cmb_Choix_Projets.TabIndex        = 0
 
 ############# Groupe de radio bouton Choix de la configuration ################
@@ -759,9 +762,9 @@ $cmb_Choix_Projets.TabIndex        = 0
 $choix_options.DataBindings.DefaultDataSourceUpdateMode = 0
 $choix_options.Location = New-Object System.Drawing.Point(20,80)
 $choix_options.Size = New-Object System.Drawing.Size(480,345)
-$choix_options.TabIndex = 3
+$choix_options.TabIndex = 1
 $choix_options.TabStop = $False
-$choix_options.Text = “1. Choisir les options de configuration”
+$choix_options.Text = “1. Options de configuration”
 $choix_options.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
 
 $choix_options.Controls.Add($textbox_ProjetPath)
@@ -788,7 +791,7 @@ $choix_options.Controls.Add($label_VMPath)
 $choix_projets.DataBindings.DefaultDataSourceUpdateMode = 0
 $choix_projets.Location = New-Object System.Drawing.Point(20,435)
 $choix_projets.Size = New-Object System.Drawing.Size(480,60)
-$choix_projets.TabIndex = 3
+$choix_projets.TabIndex = 2
 $choix_projets.TabStop = $False
 $choix_projets.Text = “2. Choisir Projet :”
 $choix_projets.Font = New-Object System.Drawing.Font(“Microsoft Sans Serif”,13,0,2,1)
@@ -803,29 +806,42 @@ affiche_projets
 # Main Menu Bar
 $form.Controls.Add($menuMain)
 
-# Menu Options - File
-$menuFile.Text = "&File"
+# Menu Options - Fichier
+$menuFile.Text = "&Fichier"
 [void]$menuMain.Items.Add($menuFile)
 
-# Menu Options - File / Exit
+# Menu Options - Fichier / Quitter
 $menuExit.ShortcutKeys = "Control, Q"
-$menuExit.Text         = "&Exit"
+$menuExit.Text = "&Quitter"
 $menuExit.Add_Click({$form.Close()})
 [void]$menuFile.DropDownItems.Add($menuExit)
 
-# Menu Options - Help
-$menuHelp.Text      = "&Help"
+# Menu Options - Aide
+$menuHelp.Text      = "&Aide"
 [void]$menuMain.Items.Add($menuHelp)
 
-# Menu Options - Help / About
-# $menuDoc.Image     = [System.Drawing.SystemIcons]::Information
-$menuDoc.Text      = "Documentation"
-$menuDoc.Add_Click({Start-Process https://github.com/FabienMht/GNS3_Project_Import_Export})
+# Menu Options - Aide / Documentation
+$menuDoc.Image     = [System.Drawing.SystemIcons]::Information
+$menuDoc.Text      = "Documentation Script"
+
+$menuDoc.Add_Click({
+	write-host "Aide script d Import :" -ForegroundColor Green
+	Get-Help "$PSScriptRoot\$script_name" | out-host
+})
 [void]$menuHelp.DropDownItems.Add($menuDoc)
 
-# Menu Options - Help / About
+# Menu Options - Aide / Documentation
+$menuOnline.Image     = [System.Drawing.SystemIcons]::Information
+$menuOnline.Text      = "Documentation en ligne"
+
+$menuOnline.Add_Click({
+	Start-Process https://github.com/FabienMht/GNS3_Project_Import_Export
+})
+[void]$menuHelp.DropDownItems.Add($menuOnline)
+
+# Menu Options - Aide / A propos
 $menuAbout.Image     = [System.Drawing.SystemIcons]::Information
-$menuAbout.Text      = "About MenuStrip"
+$menuAbout.Text      = "A propos de GNS3-Import-Export"
 $menuAbout.Add_Click({About})
 [void]$menuHelp.DropDownItems.Add($menuAbout)
 
@@ -851,7 +867,7 @@ $button_IPPing.Add_Click(
 	
 	[System.Windows.Forms.Messagebox]::Show('La VM GNS3 est Joignable !','VM GNS3','OK','Info')
 	
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 # Gestion event quand on clique sur le bouton OK
@@ -1291,6 +1307,9 @@ $button_Export.Add_Click(
 			Write-Host "4. Changement du repertoire de la VM du projet $nom_project terminee avec succes !" -ForegroundColor Green
 		}
 
+	} else {
+		Write-Host ""
+		Write-Host "4. Aucune VM associé au projet !" -ForegroundColor Green
 	}
 
 	$progress.Value = 90	
@@ -1337,7 +1356,7 @@ $button_Export.Add_Click(
 	[System.Windows.Forms.Messagebox]::Show('L importation est terminée : $script_time','Importation','OK','Info')
 	
 	$progress.Value = 0
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 # Gestion event quand on clique sur le bouton choisir
@@ -1353,7 +1372,7 @@ $button_ProjetPath.Add_Click(
         $textbox_ProjetPath.Text = $openFolderDialog.SelectedPath
 		
     }
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 # Gestion event quand on clique sur le bouton choisir
@@ -1368,7 +1387,7 @@ $button_ImagesPath.Add_Click(
         $textbox_ImagesPath.Text = $openFolderDialog.SelectedPath
         $script:gns3_images_path_local = $openFolderDialog.SelectedPath
     }
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 # Gestion event quand on clique sur le bouton choisir
@@ -1383,7 +1402,7 @@ $button_TmpPath.Add_Click(
         $textbox_TmpPath.Text = $openFolderDialog.SelectedPath
         $script:temp_path = $openFolderDialog.SelectedPath
     }
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 # Gestion event quand on clique sur le bouton choisir
@@ -1401,7 +1420,7 @@ $button_ExportPath.Add_Click(
 		# Appel de la fonction qui affiche les projets
 		affiche_projets
     }
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 # Gestion event quand on clique sur le bouton choisir
@@ -1416,7 +1435,7 @@ $button_VMPath.Add_Click(
         $textbox_VMPath.Text = $openFolderDialog.SelectedPath
         $script:vmware_path_vm_folder = $openFolderDialog.SelectedPath
     }
-	$statusBar.Text = "Ready"
+	$statusBar.Text = "Prêt"
 })
 
 #################################################
